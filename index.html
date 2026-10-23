@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>Front Line — Real-Time War Game</title>
+<meta name="description" content="A real-time strategy game in the style of War of Dots, with NATO unit symbols. Fight in 1900, 1939 or 2003 against an AI commander.">
+<meta name="theme-color" content="#0b0f14">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 30 20%22%3E%3Crect x=%221%22 y=%221%22 width=%2228%22 height=%2218%22 fill=%22%2380e0ff%22 stroke=%22%23000%22 stroke-width=%222%22/%3E%3Cpath d=%22M1 1L29 19M29 1L1 19%22 stroke=%22%23000%22 stroke-width=%222%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+
+<!-- ============ MENU ============ -->
+<section id="menu" class="screen">
+  <canvas id="menu-bg"></canvas>
+  <div class="menu-inner">
+    <header class="title">
+      <div class="kicker">Real-time war game</div>
+      <h1>FRONT<span>LINE</span></h1>
+      <p class="sub">Draw your front. Encircle the enemy. Take the capital.</p>
+    </header>
+
+    <div id="continue-wrap" hidden><button id="btn-continue" class="btn primary wide">Continue last battle</button></div>
+
+    <h2 class="step"><b>1</b> Pick a period</h2>
+    <div id="scen-list" class="scen-list"></div>
+
+    <h2 class="step"><b>2</b> Pick your side</h2>
+    <div id="side-list" class="choice-row"></div>
+
+    <h2 class="step"><b>3</b> Enemy commander</h2>
+    <div id="diff-list" class="choice-row">
+      <button class="choice" data-diff="easy"><b>Recruit</b><small>Slow, makes mistakes</small></button>
+      <button class="choice sel" data-diff="normal"><b>Officer</b><small>A fair fight</small></button>
+      <button class="choice" data-diff="hard"><b>General</b><small>Fast, rich, ruthless</small></button>
+    </div>
+
+    <button id="btn-start" class="btn primary wide big">Start battle</button>
+    <div class="menu-links">
+      <button id="btn-manual" class="btn ghost">Field manual: what the symbols mean</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ GAME ============ -->
+<section id="game" class="screen" hidden>
+  <header id="hud">
+    <button id="btn-menu" class="icon-btn" title="Menu">☰</button>
+    <div class="hud-title"><b id="hud-scen"></b><span id="hud-date"></span></div>
+    <div class="speed" role="group" aria-label="Game speed">
+      <button data-speed="0" title="Pause (Space)">❚❚</button>
+      <button data-speed="1" title="Normal (1)">▶</button>
+      <button data-speed="2" title="Fast (2)">▶▶</button>
+      <button data-speed="4" title="Fastest (3)">▶▶▶</button>
+    </div>
+    <div class="stat" title="Money: earned from cities you hold. Spend it to deploy new units."><span class="lbl">Funds</span><b id="hud-money">0</b></div>
+    <div class="stat" id="stat-air" title="Air strikes ready. They recharge over time."><span class="lbl">Air</span><b id="hud-air">0</b></div>
+    <div class="stat vp" title="Victory points the attacker holds out of what it needs before time runs out.">
+      <span class="lbl" id="hud-vp-lbl">Objective</span>
+      <div class="vpbar"><i id="hud-vp-fill"></i><em id="hud-vp-mark"></em></div>
+      <b id="hud-vp">0/0</b>
+    </div>
+    <div class="stat time"><span class="lbl">Time left</span><b id="hud-time"></b></div>
+  </header>
+
+  <div id="stage">
+    <canvas id="map"></canvas>
+    <div id="toasts"></div>
+    <div id="tooltip" hidden></div>
+    <div id="mode-hint" hidden></div>
+    <div id="paused-tag" hidden>PAUSED: press Space or ▶</div>
+
+    <aside id="panel" hidden></aside>
+
+    <div id="toolbar">
+      <div class="tb-group" id="tb-deploy"></div>
+      <div class="tb-group">
+        <button class="tool" id="btn-air" title="Call an air strike (F)"><span class="ico">✈</span><span>Air strike</span></button>
+        <button class="tool" id="btn-all" title="Select all your ground units (A)"><span class="ico">◎</span><span>Select all</span></button>
+        <button class="tool" id="btn-box" title="Box select: drag a rectangle to select (or hold Shift and drag)"><span class="ico">⬚</span><span>Box select</span></button>
+        <button class="tool" id="btn-help" title="How to play (?)"><span class="ico">?</span><span>Help</span></button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ OVERLAYS ============ -->
+<div id="overlay" hidden><div class="sheet" id="sheet"></div></div>
+
+<script src="symbols.js?v=1"></script>
+<script src="scenarios.js?v=1"></script>
+<script src="engine.js?v=1"></script>
+<script src="ai.js?v=1"></script>
+<script src="ui.js?v=1"></script>
+</body>
+</html>
