@@ -1,7 +1,7 @@
 /* NATO (APP-6 / MIL-STD-2525) style unit symbols drawn on a canvas.
    Friendly units: blue rectangle. Hostile units: red diamond. Always from the viewer's side. */
 (function (root) {
-  const FRIEND = '#80e0ff', HOSTILE = '#ff8080', INK = '#0b0f14';
+  const FRIEND = '#80e0ff', HOSTILE = '#ff8080', NEUTRAL = '#aaffaa', INK = '#0b0f14';
 
   // Echelon marks drawn above the frame.
   const ECHELON = { 'II': 'Battalion', 'III': 'Regiment', 'X': 'Brigade', 'XX': 'Division', 'XXX': 'Corps / Army' };
@@ -77,7 +77,8 @@
   /* Draw a unit symbol centred at (cx,cy). s = frame height for friendly.
      opts: { friendly, ech, str (0..100), selected, dim } */
   function drawUnit(ctx, cx, cy, s, type, opts) {
-    const friendly = opts.friendly !== false;
+    const affil = opts.affil || (opts.friendly === false ? 'hostile' : 'friend');
+    const friendly = affil === 'friend';
     const lw = Math.max(1, s * 0.075);
     ctx.save();
     if (opts.dim) ctx.globalAlpha = 0.55;
@@ -88,6 +89,11 @@
       ctx.rect(cx - w / 2, cy - h / 2, w, h);
       top = cy - h / 2; bottom = cy + h / 2;
       box = [cx - w / 2, cy - h / 2, w, h];
+    } else if (affil === 'neutral') {
+      const h = s * 1.1;
+      ctx.rect(cx - h / 2, cy - h / 2, h, h);
+      top = cy - h / 2; bottom = cy + h / 2;
+      box = [cx - h / 2, cy - h / 2, h, h];
     } else {
       const d = s * 0.82;
       ctx.moveTo(cx, cy - d); ctx.lineTo(cx + d, cy); ctx.lineTo(cx, cy + d); ctx.lineTo(cx - d, cy); ctx.closePath();
@@ -95,14 +101,14 @@
       const q = d; box = [cx - q / 2, cy - q / 2, q, q];
     }
     if (opts.selected) { ctx.save(); ctx.shadowColor = '#fff'; ctx.shadowBlur = s * 0.6; ctx.lineWidth = lw * 3; ctx.strokeStyle = '#ffffff'; ctx.stroke(); ctx.restore(); }
-    ctx.fillStyle = friendly ? FRIEND : HOSTILE; ctx.fill();
+    ctx.fillStyle = friendly ? FRIEND : affil === 'neutral' ? NEUTRAL : HOSTILE; ctx.fill();
     ctx.save(); ctx.clip();
     drawIcon(ctx, type, box[0], box[1], box[2], box[3], lw);
     ctx.restore();
     ctx.lineWidth = lw; ctx.strokeStyle = INK; ctx.stroke();
     if (type === 'hq') { // HQ staff
-      const x = friendly ? cx - s * 0.75 : cx - s * 0.82;
-      const y = friendly ? bottom : cy;
+      const x = friendly ? cx - s * 0.75 : affil === 'neutral' ? cx - s * 0.55 : cx - s * 0.82;
+      const y = friendly || affil === 'neutral' ? bottom : cy;
       ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + s * 0.7); ctx.stroke();
     }
     drawEchelon(ctx, opts.ech, cx, top, s);
@@ -117,5 +123,5 @@
     return { top, bottom };
   }
 
-  root.NatoSymbols = { drawUnit, ECHELON, FRIEND, HOSTILE };
+  root.NatoSymbols = { drawUnit, ECHELON, FRIEND, HOSTILE, NEUTRAL };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -3,98 +3,116 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
-<title>Front Line — Real-Time War Game</title>
-<meta name="description" content="A real-time strategy game in the style of War of Dots, with NATO unit symbols. Fight in 1900, 1939 or 2003 against an AI commander.">
+<title>Front Line</title>
+<meta name="description" content="An open-world grand strategy game. Lead any nation in 1900, 1939 or 2003. An AI plays every other nation, and you can fight battles yourself with NATO unit symbols.">
 <meta name="theme-color" content="#0b0f14">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 30 20%22%3E%3Crect x=%221%22 y=%221%22 width=%2228%22 height=%2218%22 fill=%22%2380e0ff%22 stroke=%22%23000%22 stroke-width=%222%22/%3E%3Cpath d=%22M1 1L29 19M29 1L1 19%22 stroke=%22%23000%22 stroke-width=%222%22/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="style.css?v=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 
-<!-- ============ MENU ============ -->
-<section id="menu" class="screen">
-  <canvas id="menu-bg"></canvas>
-  <div class="menu-inner">
+<!-- ============ START ============ -->
+<section id="start" class="screen">
+  <canvas id="start-bg"></canvas>
+  <div class="start-inner">
     <header class="title">
-      <div class="kicker">Real-time war game</div>
+      <div class="kicker">Grand strategy · alternate history</div>
       <h1>FRONT<span>LINE</span></h1>
-      <p class="sub">Draw your front. Encircle the enemy. Take the capital.</p>
+      <p class="sub">Lead any nation. Every other country is played by an AI that writes back.</p>
     </header>
+    <div id="continue-wrap" hidden><button id="btn-continue" class="btn primary wide"></button></div>
+    <h2 class="step"><b>1</b> Pick a year</h2>
+    <div id="period-list" class="period-list"></div>
+    <p id="ai-status" class="ai-status"></p>
+  </div>
+</section>
 
-    <div id="continue-wrap" hidden><button id="btn-continue" class="btn primary wide">Continue last battle</button></div>
-
-    <h2 class="step"><b>1</b> Pick a period</h2>
-    <div id="scen-list" class="scen-list"></div>
-
-    <h2 class="step"><b>2</b> Pick your side</h2>
-    <div id="side-list" class="choice-row"></div>
-
-    <h2 class="step"><b>3</b> Enemy commander</h2>
-    <div id="diff-list" class="choice-row">
-      <button class="choice" data-diff="easy"><b>Recruit</b><small>Slow, makes mistakes</small></button>
-      <button class="choice sel" data-diff="normal"><b>Officer</b><small>A fair fight</small></button>
-      <button class="choice" data-diff="hard"><b>General</b><small>Fast, rich, ruthless</small></button>
-    </div>
-
-    <button id="btn-start" class="btn primary wide big">Start battle</button>
-    <div class="menu-links">
-      <button id="btn-manual" class="btn ghost">Field manual: what the symbols mean</button>
-    </div>
+<!-- ============ PICK A NATION ============ -->
+<section id="pick" class="screen" hidden>
+  <header class="bar">
+    <button class="icon-btn" id="pick-back" title="Back">←</button>
+    <div class="bar-title"><b id="pick-title"></b><span>Step 2: tap any country to lead it</span></div>
+    <input id="pick-search" type="search" placeholder="Search nations…" autocomplete="off">
+  </header>
+  <div class="stage"><canvas id="pick-map"></canvas>
+    <div id="pick-quick" class="quick"></div>
+    <aside id="pick-card" class="card" hidden></aside>
+    <div id="pick-results" class="search-results" hidden></div>
   </div>
 </section>
 
 <!-- ============ GAME ============ -->
 <section id="game" class="screen" hidden>
-  <header id="hud">
-    <button id="btn-menu" class="icon-btn" title="Menu">☰</button>
-    <div class="hud-title"><b id="hud-scen"></b><span id="hud-date"></span></div>
-    <div class="speed" role="group" aria-label="Game speed">
+  <header class="bar" id="hud">
+    <button class="icon-btn" id="btn-menu" title="Menu">☰</button>
+    <div class="nation-chip"><i id="hud-color"></i><div><b id="hud-name"></b><span id="hud-date"></span></div></div>
+    <div class="stat" title="Treasury. Earned each month from your economy and land."><span class="lbl">Treasury</span><b id="hud-money"></b></div>
+    <div class="stat" title="Total divisions in your armies."><span class="lbl">Army</span><b id="hud-div"></b></div>
+    <div class="stat" title="Stability. Low stability cuts income and invites unrest."><span class="lbl">Stability</span><b id="hud-stab"></b></div>
+    <div class="stat hide-sm" title="Wars you are fighting."><span class="lbl">Wars</span><b id="hud-wars"></b></div>
+    <div id="ai-badge" class="ai-badge" title="Whether the AI game master is reachable"></div>
+  </header>
+  <div class="stage">
+    <canvas id="map"></canvas>
+    <div id="toasts"></div>
+    <div id="tooltip" hidden></div>
+    <aside id="sel-card" class="card" hidden></aside>
+    <aside id="side">
+      <nav class="tabs">
+        <button data-tab="orders" class="on">Orders</button>
+        <button data-tab="diplo">Diplomacy</button>
+        <button data-tab="news">News <i id="news-dot" hidden></i></button>
+        <button class="collapse" id="side-toggle" title="Hide panel">▾</button>
+      </nav>
+      <div class="tab-body" id="tab-orders"></div>
+      <div class="tab-body" id="tab-diplo" hidden></div>
+      <div class="tab-body" id="tab-news" hidden></div>
+    </aside>
+    <button id="btn-end" class="btn primary"><span>End turn</span><small id="end-date"></small></button>
+  </div>
+</section>
+
+<!-- ============ BATTLE ============ -->
+<section id="battle" class="screen" hidden>
+  <header class="bar" id="b-hud">
+    <button class="icon-btn" id="b-retreat" title="Retreat (ends the battle as a loss)">⚑</button>
+    <div class="bar-title"><b id="b-title"></b><span id="b-sub"></span></div>
+    <div class="speed" role="group" aria-label="Battle speed">
       <button data-speed="0" title="Pause (Space)">❚❚</button>
       <button data-speed="1" title="Normal (1)">▶</button>
       <button data-speed="2" title="Fast (2)">▶▶</button>
       <button data-speed="4" title="Fastest (3)">▶▶▶</button>
     </div>
-    <div class="stat" title="Money: earned from cities you hold. Spend it to deploy new units."><span class="lbl">Funds</span><b id="hud-money">0</b></div>
-    <div class="stat" id="stat-air" title="Air strikes ready. They recharge over time."><span class="lbl">Air</span><b id="hud-air">0</b></div>
-    <div class="stat vp" title="Victory points the attacker holds out of what it needs before time runs out.">
-      <span class="lbl" id="hud-vp-lbl">Objective</span>
-      <div class="vpbar"><i id="hud-vp-fill"></i><em id="hud-vp-mark"></em></div>
-      <b id="hud-vp">0/0</b>
-    </div>
-    <div class="stat time"><span class="lbl">Time left</span><b id="hud-time"></b></div>
+    <div class="stat"><span class="lbl">Strength</span><b id="b-str"></b></div>
+    <div class="stat"><span class="lbl">Time left</span><b id="b-time"></b></div>
   </header>
-
-  <div id="stage">
-    <canvas id="map"></canvas>
-    <div id="toasts"></div>
-    <div id="tooltip" hidden></div>
-    <div id="mode-hint" hidden></div>
-    <div id="paused-tag" hidden>PAUSED: press Space or ▶</div>
-
-    <aside id="panel" hidden></aside>
-
-    <div id="toolbar">
-      <div class="tb-group" id="tb-deploy"></div>
-      <div class="tb-group">
-        <button class="tool" id="btn-air" title="Call an air strike (F)"><span class="ico">✈</span><span>Air strike</span></button>
-        <button class="tool" id="btn-all" title="Select all your ground units (A)"><span class="ico">◎</span><span>Select all</span></button>
-        <button class="tool" id="btn-box" title="Box select: drag a rectangle to select (or hold Shift and drag)"><span class="ico">⬚</span><span>Box select</span></button>
-        <button class="tool" id="btn-help" title="How to play (?)"><span class="ico">?</span><span>Help</span></button>
-      </div>
+  <div class="stage" id="b-stage">
+    <canvas id="b-map"></canvas>
+    <div id="b-toasts" class="toasts"></div>
+    <div id="b-tip" class="tooltip" hidden></div>
+    <div id="b-hint" class="mode-hint" hidden></div>
+    <aside id="b-panel" class="card" hidden></aside>
+    <div id="b-toolbar" class="toolbar">
+      <button class="tool" id="b-all"><span class="ico">◎</span><span>Select all</span></button>
+      <button class="tool" id="b-box"><span class="ico">⬚</span><span>Box select</span></button>
+      <button class="tool" id="b-air"><span class="ico">✈</span><span>Air strike</span></button>
+      <button class="tool" id="b-help"><span class="ico">?</span><span>Controls</span></button>
     </div>
   </div>
 </section>
 
-<!-- ============ OVERLAYS ============ -->
 <div id="overlay" hidden><div class="sheet" id="sheet"></div></div>
 
-<script src="symbols.js?v=1"></script>
-<script src="scenarios.js?v=1"></script>
-<script src="engine.js?v=1"></script>
-<script src="ai.js?v=1"></script>
-<script src="ui.js?v=1"></script>
+<script src="js/symbols.js?v=2"></script>
+<script src="js/world.js?v=2"></script>
+<script src="js/gm.js?v=2"></script>
+<script src="js/map.js?v=2"></script>
+<script src="battle/engine.js?v=2"></script>
+<script src="battle/ai.js?v=2"></script>
+<script src="battle/battle.js?v=2"></script>
+<script src="js/app.js?v=2"></script>
 </body>
 </html>

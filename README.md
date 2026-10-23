@@ -1,36 +1,41 @@
 # Front Line
 
-A real-time war game in the style of *War of Dots* and *Lines of Battle*, with units drawn as NATO (APP-6) map symbols.
+An open-world grand strategy game in the browser. Pick a year (1900, 1939 or 2003), pick **any nation**, and play
+month by month while an AI game master (Claude) runs every other country.
 
-- Units paint territory as they move and fight on contact.
-- Select several units and drag a line to spread them along a front.
-- Supply flows from your home edge and supply cities; cut-off units weaken.
-- Cities earn funds to deploy new units. Take the enemy capital to win at once.
-
-## Battles
-
-| Year | Battle | Sides |
-|------|--------|-------|
-| 1900 | Road to Pretoria (Second Boer War) | British Empire vs Boer Republics |
-| 1939 | Fall Weiss (Invasion of Poland) | Germany vs Poland |
-| 2003 | Thunder Run (Invasion of Iraq) | Coalition vs Iraq |
-
-Play either side against an AI commander at three difficulty levels.
+- **Write orders in plain words.** "Build railways", "demand the Danzig corridor", "fund drones". The AI judges
+  what happens and writes a newspaper report each month.
+- **Talk to any leader.** Open a diplomatic channel and negotiate in your own words: alliances, peace, land, trade.
+  When a leader agrees to a deal, you can sign it.
+- **Move armies on the world map.** Armies are drawn with NATO map symbols: blue for you and your allies, red for
+  enemies, green for neutrals. Ship troops overseas from your ports.
+- **Fight battles yourself or auto-resolve them.** Choose *Command the battle* to zoom down to a real-time
+  battlefield and control every unit: draw front lines, call air strikes, take the objective.
 
 ## Run it
 
-No build step. Open `index.html` through any static web server, for example:
+No build step. Serve the folder with any static server, for example:
 
 ```
 python3 -m http.server
 ```
 
-then visit http://localhost:8000. To host it free, turn on GitHub Pages for this repository (Settings → Pages → deploy from the `main` branch).
+then open http://localhost:8000. For free hosting, turn on GitHub Pages (Settings → Pages → deploy from `main`).
+
+## The AI game master
+
+`supabase/functions/ai/index.ts` is a Supabase Edge Function that calls the Claude API. It needs the secret
+`ANTHROPIC_API_KEY` set in the Supabase project (Edge Functions → Secrets). Optionally set `CLAUDE_MODEL` to use a
+different model. When the server can't be reached, the game keeps working with simple built-in rules.
 
 ## Files
 
-- `engine.js`: the simulation (movement, combat, territory, supply, victory)
-- `ai.js`: the enemy commander
-- `scenarios.js`: maps, cities and orders of battle
-- `symbols.js`: NATO symbol drawing
-- `ui.js`, `index.html`, `style.css`: rendering, controls and menus
+- `js/world.js`: world rules (nations, provinces, armies, wars, economy, computer-run militaries)
+- `js/gm.js`: talks to the AI game master; offline fallback
+- `js/map.js`: world map rendering and input
+- `js/app.js`: screens, panels and the turn flow
+- `battle/`: the real-time tactical battle engine, its AI, and the battle screen
+- `data/`: world maps per period (see `data/CREDITS.md`)
+- `tools/build_map.py`: rebuilds the map data from the source datasets
+
+Map data: GPL-3.0 (historical-basemaps) and public domain (Natural Earth). See `data/CREDITS.md`.
