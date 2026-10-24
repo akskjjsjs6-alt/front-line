@@ -21,6 +21,77 @@
     } finally { clearTimeout(t); }
   }
 
+  // ================================================================ your own AI
+  // The game master thinks on an AI. Default: the free managed server. The alternative is
+  // 'manual': no account, no API — the game writes the prompt, the user pastes it into the
+  // AI they already keep open (Gemini, ChatGPT, Claude...), then pastes the reply back.
+  // (A page cannot type into another site's tab, so the copy-paste relay is the bridge.)
+  const MYAI_KEY = 'frontline-myai';
+  function myAI() {
+    try { const c = JSON.parse(localStorage.getItem(MYAI_KEY) || '{}'); return { mode: c.mode === 'manual' ? 'manual' : 'server' }; }
+    catch (e) { return { mode: 'server' }; }
+  }
+  function saveMyAI(cfg) { localStorage.setItem(MYAI_KEY, JSON.stringify({ mode: cfg && cfg.mode === 'manual' ? 'manual' : 'server' })); }
+
+  // The AI replies in prose around the JSON (or inside a code fence); grab the object itself.
+  function jsonFrom(text) {
+    const s = String(text || '');
+    const a = s.indexOf('{'), b = s.lastIndexOf('}');
+    if (a < 0 || b <= a) throw new Error('No JSON object found in that reply. Ask the AI to answer with only the JSON.');
+    let j;
+    try { j = JSON.parse(s.slice(a, b + 1)); } catch (e) { throw new Error('That reply is not valid JSON. Paste just the JSON (or ask the AI to answer with JSON only).'); }
+    return j;
+  }
+  // The game-master instructions. The managed server holds its own copy (it evolved here),
+  // and these mirror it so the user's own AI plays exactly the same role.
+  function turnRules() {
+    return `You are the game master of a grand-strategy world. Given the date, game state and the player's orders, you simulate the next month and reply ONLY with a JSON object — no prose outside it, no markdown fences.
+
+Pitch your simulation at the period and the stated relationships: wars ebb and flow, alliances form from good opinion and break from bad, weak nations get absorbed, great powers act ambitiously but not suicidally. Judge the player's orders fairly (grand undertakings may fail; put the outcome in player_results). No anachronisms for the period.
+
+JSON shape (all fields required; keep events to 4 and changes to 8):
+{
+  "headline": "short headline of the month",
+  "summary": "one or two sentences",
+  "events": [{"title": "...", "body": "...", "nations": ["Nation Name"]}],
+  "player_results": [{"order": "the player's order text", "outcome": "what it led to", "success": true}],
+  "changes": [{"kind": "...", "a": "NationA", "b": "NationB", "provinces": ["Province Name"], "value": 0, "text": "..."}],
+  "messages_to_player": [{"from": "Nation Name", "text": "what their leader writes to the player"}]
+}
+changes[].kind must be one of:
+declare_war (a attacks b) | make_peace (a,b; provinces listed go to a) | alliance | end_alliance |
+transfer_provinces (from b to a; province names must match the game map) | annex (a absorbs b) |
+relation (a,b, value -40..40) | stat (a, text = economy OR stability OR military, value -15..15) |
+leader (a, text = new leader name) | government (a, text = new government form) | rename (a, text = new name) |
+independence (a = new nation name, b = releasing power, provinces) | recruit (a, value = number of divisions, max 20).
+Only nations AT WAR with each other can make_peace; only non-belligerents can form an alliance; use names EXACTLY as they appear in the game state.
+"messages_to_player" is for personal notes from one leader to the player — demands, warnings, friendly letters.`;
+  }
+  function chatRules() {
+    return `You are the leader of a nation in a grand-strategy game, writing to the player's leader. Read the state and history and stay in character: posture follows opinion, war status and strength. Reply ONLY with a JSON object — no prose outside it, no markdown fences.
+
+{
+  "reply": "your message, in character, a few sentences",
+  "relation_change": -20 to 20,
+  "agreement": { "kind": "...", "terms": "...", "provinces": ["Province Name"], "provinces_go_to": "player|them|none", "target": "nation name" }
+}
+agreement.kind must be one of: none | peace | alliance | end_alliance | transfer_provinces |
+war_together (join the player's war against target) | declare_war (against the player) |
+non_aggression | military_access | trade.
+Refuse reasonable-sounding demands when opinion is bad or their position is strong. When at peace with the player you may trade or form a non-aggression pact; alliances need trust (opinion); peace needs to make sense militarily. provinces_go_to says who takes the listed provinces.`;
+  }
+  function promptOf(rules, body) {
+    return `${rules}\n\n=== GAME STATE AND GAME INPUT (JSON) ===\n${JSON.stringify(body)}\n\nReply with ONLY the JSON object.`;
+  }
+  function scrubTurn(j) {
+    return Object.assign({ headline: 'A month passes', summary: '', events: [], player_results: [], changes: [], messages_to_player: [] }, j && typeof j === 'object' ? j : {});
+  }
+  function scrubChat(j) {
+    const r = Object.assign({ reply: '', relation_change: 0, agreement: { kind: 'none', terms: '', provinces: [], provinces_go_to: 'none', target: '' } }, j && typeof j === 'object' ? j : {});
+    if (!r.agreement || typeof r.agreement !== 'object') r.agreement = { kind: 'none', terms: '', provinces: [], provinces_go_to: 'none', target: '' };
+    return r;
+  }
+
   // ---------------------------------------------------------------- world summary for the AI
   function nationInfo(data, g, i, withProvinces) {
     const n = g.nations[i], Wd = W();
@@ -57,6 +128,7 @@
       orders: ctx.orders || '', diplomacy: ctx.diplomacy || [], battles: ctx.battles || [],
       world: worldSummary(data, g), history: g.history.slice(-14), timeline: W().upcoming(g, 5)
     };
+    if (myAI().mode === 'manual') return { online: false, manual: promptOf(turnRules(), body), error: 'waiting for your AI' };
     try {
       const res = await call(body);
       return { online: true, res };
@@ -160,6 +232,7 @@
       context: { recent_history: g.history.slice(-10) },
       history: hist.slice(-16), message
     };
+    if (myAI().mode === 'manual') return { online: false, manual: promptOf(chatRules(), body), error: 'waiting for your AI' };
     try {
       const res = await call(body, 90000);
       return { online: true, res };
@@ -209,5 +282,9 @@
     return null;
   }
 
-  root.GM = { runTurn, applyTurn, chat, applyAgreement, AI_URL };
+  // ---- helpers for the paste-bridge UI (app.js runs the sheet; gm.js owns parsing)
+  function turnFromText(text) { return scrubTurn(jsonFrom(text)); }
+  function chatFromText(text) { return scrubChat(jsonFrom(text)); }
+
+  root.GM = { runTurn, applyTurn, chat, applyAgreement, AI_URL, myAI, saveMyAI, turnFromText, chatFromText, offlineTurn, offlineChat };
 })(window);

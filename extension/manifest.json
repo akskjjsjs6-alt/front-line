@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Front Line AI relay (your Gemini)",
+  "version": "1.0.0",
+  "description": "Lets Front Line run its AI game master on your own logged-in Gemini web tab — no API keys. The prompt is typed into gemini.google.com for you and the answer is returned to the game.",
+  "permissions": ["tabs"],
+  "host_permissions": ["https://gemini.google.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    { "matches": ["https://gemini.google.com/*"], "js": ["gemini.js"], "run_at": "document_idle" },
+    { "matches": ["https://akskjjsjs6-alt.github.io/*", "http://localhost/*", "http://127.0.0.1/*"], "js": ["game.js"], "run_at": "document_idle" }
+  ]
+}
