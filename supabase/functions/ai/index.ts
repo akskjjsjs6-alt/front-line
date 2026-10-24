@@ -230,12 +230,19 @@ async function cascade(system: string, user: string, schema: object, kind: "turn
   if (first) list = [{ id: first, schema: true, json: true, mustThink: false }, ...list.filter(m => m.id !== first)];
   const hedge = kind === "chat" ? 4000 : 8000, perTry = kind === "chat" ? 25_000 : 50_000, deadline = Date.now() + 135_000;
   return await new Promise((resolve, reject) => {
-    let i = 0, running = 0, done = false, lastErr: unknown = null;
+    let i = 0, running = 0, done = false, rounds = 0, lastErr: unknown = null;
     const ctrls: AbortController[] = [];
     const finish = (fn: () => void) => { if (done) return; done = true; for (const c of ctrls) c.abort(); fn(); };
     const next = () => {
       if (done) return;
       if (i >= list.length || Date.now() > deadline - 3000) {
+        // the whole list failed this pass (every model busy or rate limited). Cooldowns are short,
+        // so if the deadline allows it, rest a beat and work down the list again instead of failing.
+        if (!running && rounds < 3 && Date.now() < deadline - 45_000) {
+          rounds++; i = 0;
+          setTimeout(next, 15_000);
+          return;
+        }
         if (!running) finish(() => reject(lastErr || new Error("No free AI model answered.")));
         return;
       }
