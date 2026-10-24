@@ -279,7 +279,11 @@ onmessage = (e) => {
 
   class WorldMap {
     constructor(canvas, data, opts) {
-      this.cv = canvas; this.ctx = canvas.getContext('2d');
+      // Opaque, low-latency backing store: the map always paints every pixel, so there is nothing
+      // to composite behind it, and 'desynchronized' keeps drags closer to the pointer.
+      this.cv = canvas;
+      try { this.ctx = canvas.getContext('2d', { alpha: false, desynchronized: true }); }
+      catch (e) { this.ctx = canvas.getContext('2d'); }
       this.data = data; this.opts = opts;
       this.geo = prepare(data);
       this.W = this.geo.W; this.H = this.geo.H;
@@ -289,8 +293,13 @@ onmessage = (e) => {
       this.wq = []; this.wks = null; this.wInit = false; this.statePktVer = -1; this.mEnv = null; this.mEnvVer = -1;
       this.bootWorkers();
       this.version = 0; this.labelsDirty = true; this.labelsAt = 0;
+      this.drawnVer = -1; this.drawnArmyHash = null; this.drawnAt = 0;
       this.hit = document.createElement('canvas').getContext('2d');
       this.textW = new Map();
+      this.monoW = new Map();         // army strength label widths (measureText is per-frame otherwise)
+      this.unitSprites = new Map();   // pre-rendered NATO symbols, per type/affiliation/echelon/size
+      this.starSprites = new Map();   // capital stars
+      this.strSprites = new Map();    // army strength plates
       const img = relief(); if (!img.complete) img.addEventListener('load', () => this.paint(), { once: true });
       this.bindInput();
     }
@@ -346,8 +355,9 @@ onmessage = (e) => {
       const r = this.cv.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
       this.sw = r.width; this.sh = r.height; this.dpr = dpr;
       this.cv.width = Math.round(r.width * dpr); this.cv.height = Math.round(r.height * dpr);
-      this.anim = null; this.wheel = null;
-      // tile cache bound: enough for the largest possible single view at this size, never fewer than 256
+      this.anim = null; this.wheel = null; this.drawnVer = -1;   // resizing clears the canvas: repaint
+      // sprite sizes are baked at the device-pixel ratio, so a dpr change invalidates them
+      this.unitSprites.clear(); this.starSprites.clear(); this.strSprites.clear(); this.monoW.clear();
       this.cacheCap = Math.max(256, (Math.ceil(this.sw * dpr / TS) + 2) * (Math.ceil(this.sh * dpr / TS) + 2) + 160);
       this.clamp();
     }
@@ -416,8 +426,7 @@ onmessage = (e) => {
       // synchronous tile paint — the fallback when worker painters are unavailable.
       // A tile painted by a worker holds an ImageBitmap, which has no 2d context: swap in a canvas.
       if (!t.cv || typeof t.cv.getContext !== 'function') {
-        const cv = this.pool.pop() || document.createElement('canvas');
-        cv.width = cv.height = TS;
+        const cv = this.takeCanvas();
         cv.getContext('2d').drawImage(t.cv, 0, 0, TS, TS);
         if (t.cv && t.cv.close) t.cv.close();
         t.cv = cv;
@@ -476,13 +485,31 @@ onmessage = (e) => {
       const t = m.k != null ? this.tiles.get(m.k) : null;
       if (t && m.ver === this.version) {
         if (!t.ready) t.shownAt = performance.now();
-        if (t.cv && typeof t.cv.getContext === 'function' && this.pool.length < 24) this.pool.push(t.cv);
-        t.cv = m.bmp; t.dirty = false; t.ready = true; t.fly = false;
+        // Copy the worker's bitmap into a plain canvas *once*, here. Blitting an ImageBitmap
+        // turns out to be ~9x slower per frame than blitting the same pixels as a canvas
+        // (7.2ms vs 0.8ms for a full screen of tiles), so pay the copy on arrival instead.
+        const cv = this.takeCanvas();
+        cv.getContext('2d').drawImage(m.bmp, 0, 0);
+        if (m.bmp.close) m.bmp.close();
+        if (t.cv !== cv) this.recycle(t.cv);
+        t.cv = cv; t.dirty = false; t.ready = true; t.fly = false;
       } else {
         if (t) t.fly = false;                              // stale content: let the tile be re-enqueued
         if (m.bmp && m.bmp.close) m.bmp.close();           // stale pixels: release them
       }
       this.deliver();
+    }
+    // Tile canvases are pooled: creating a 256x256 canvas per tile is a GPU allocation each time.
+    takeCanvas() {
+      const cv = this.pool.pop();
+      if (!cv) { const n = document.createElement('canvas'); n.width = n.height = TS; return n; }
+      if (cv.width !== TS) { cv.width = cv.height = TS; }
+      return cv;
+    }
+    recycle(cv) {
+      if (!cv) return;
+      if (typeof cv.getContext === 'function') { if (this.pool.length < 32) { if (cv.width !== TS) { cv.width = cv.height = TS; } this.pool.push(cv); } }
+      else if (cv.close) cv.close();
     }
     deliver() {
       // send queued jobs to idle painters, until every worker is busy or the queue is empty
@@ -538,7 +565,7 @@ onmessage = (e) => {
       for (const [k, t] of this.tiles) {
         if (this.tiles.size <= maxKeep) break;
         if (keep && keep.has(t)) continue;
-        this.tiles.delete(k); this.pool.push(t.cv);
+        this.tiles.delete(k); this.recycle(t.cv);
       }
       if (this.pool.length > this.cacheCap) this.pool.length = this.cacheCap;   // canvases beyond the bound go to the GC
     }
@@ -552,9 +579,25 @@ onmessage = (e) => {
       }
       return null;
     }
+    // Which tile level to use. Hysteresis matters: without it, a camera resting exactly on a
+    // level boundary can flip between two levels as the eased zoom settles, and every flip throws
+    // the whole map away and repaints it — which reads as the map "refreshing" on its own.
+    levelFor(sc) {
+      const ideal = Math.log2(sc / S0);
+      let L = this.L;
+      if (L == null) L = Math.ceil(ideal - 0.05);
+      else {
+        const drawn = sc / (S0 * 2 ** L);      // 1 = tile drawn at its native 256px
+        if (drawn > 1.12) L++;
+        else if (drawn < 0.54) L--;
+      }
+      L = Math.max(0, Math.min(MAXL, L));
+      this.L = L;
+      return L;
+    }
     drawTiles(ctx, now) {
       const { cam, dpr } = this, sc = cam.z * dpr;
-      const L = Math.max(0, Math.min(MAXL, Math.ceil(Math.log2(sc / S0) - 0.05)));
+      const L = this.levelFor(sc);
       const tw = TS / (S0 * 2 ** L);
       const nx = Math.ceil(this.W / tw), ny = Math.ceil(this.H / tw);
       const tx0 = Math.max(0, Math.floor(cam.x / tw)), ty0 = Math.max(0, Math.floor(cam.y / tw));
@@ -589,14 +632,18 @@ onmessage = (e) => {
         }
       }
       ctx.imageSmoothingEnabled = true;
-      // Whole-world base under everything: while sharper tiles stream in (or after a repaint)
-      // the map can never fall back to bare ocean-blue — no blank flash.
-      const W2 = this.cv.width, H2 = this.cv.height;
-      for (const t of this.tiles.values()) {
-        if (t.L !== 0 || !t.ready) continue;
-        const dx = (t.x0 - cam.x) * sc, dy = (t.y0 - cam.y) * sc, w = (t.x1 - t.x0) * sc, h = (t.y1 - t.y0) * sc;
-        if (dx > W2 || dy > H2 || dx + w < 0 || dy + h < 0) continue;
-        ctx.drawImage(t.cv, dx, dy, w, h);
+      // Whole-world base under the shot, but only when something is actually missing: in the
+      // steady state the visible tiles cover every device pixel, and two full-screen upscaled
+      // blits cost ~7ms a frame for nothing (the biggest single per-frame cost on the map).
+      const missing = vis.some(t => !t.ready);
+      if (missing) {
+        const W2 = this.cv.width, H2 = this.cv.height;
+        for (const t of this.tiles.values()) {
+          if (t.L !== 0 || !t.ready) continue;
+          const dx = (t.x0 - cam.x) * sc, dy = (t.y0 - cam.y) * sc, w = (t.x1 - t.x0) * sc, h = (t.y1 - t.y0) * sc;
+          if (dx > W2 || dy > H2 || dx + w < 0 || dy + h < 0) continue;
+          ctx.drawImage(t.cv, dx, dy, w, h);
+        }
       }
       // Tiles are placed at their exact sub-pixel rect (not snapped to whole device pixels):
       // slow pans glide instead of stepping, and neighbouring tiles always meet on one edge.
@@ -649,6 +696,59 @@ onmessage = (e) => {
 
     // ---------------------------------------------------------------- labels (drawn every frame, on top of the tiles)
     textWidth(c, s) { let w = this.textW.get(s); if (w == null) { c.font = '500 10px "Source Serif 4", Georgia, serif'; w = c.measureText(s).width / 10; this.textW.set(s, w); } return w; }
+    // A pre-rendered capital star (there can be 170+ of them on screen, every frame).
+    starSprite(R, r) {
+      const qr = Math.round(R * 2) / 2, qi = Math.round(r * 2) / 2, key = qr + '/' + qi;
+      let s = this.starSprites.get(key);
+      if (s) return s;
+      const dpr = this.dpr || 1, w = Math.ceil(qr * 2 + 5);
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = Math.ceil(w * dpr);
+      const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      star(c, w / 2, w / 2, qr, qi, '#fff7e0', 'rgba(20,10,0,.8)');
+      s = { cv, w }; this.starSprites.set(key, s);
+      return s;
+    }
+    // A pre-rendered NATO unit symbol. During a big war a hundred of these are on screen and
+    // each one is a dozen paths plus a clipped icon — drawing a sprite is far cheaper.
+    unitSprite(size, type, affil, ech, selected) {
+      const q = Math.max(4, Math.round(size));
+      const key = q + '|' + type + '|' + (affil || 'friend') + '|' + (ech || '') + '|' + (selected ? 1 : 0);
+      let s = this.unitSprites.get(key);
+      if (s) return s;
+      const dpr = this.dpr || 1, pad = Math.ceil(q * 0.5) + 3;
+      const w = Math.ceil(q * 1.6) + pad * 2, h = Math.ceil(q * 1.75) + pad * 2;
+      const cv = document.createElement('canvas');
+      cv.width = Math.ceil(w * dpr); cv.height = Math.ceil(h * dpr);
+      const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      NS.drawUnit(c, w / 2, h / 2, q, type, { affil, ech, selected });
+      s = { cv, w, h, ox: w / 2, oy: h / 2 };
+      if (this.unitSprites.size > 180) this.unitSprites.delete(this.unitSprites.keys().next().value);
+      this.unitSprites.set(key, s);
+      return s;
+    }
+    // A pre-rendered strength plate ("12.5" on a dark chip).
+    strSprite(label, fpx) {
+      const key = fpx + '|' + label;
+      let s = this.strSprites.get(key);
+      if (s) return s;
+      const c0 = this.hit; c0.font = `700 ${fpx}px "IBM Plex Mono", monospace`;
+      let tw = this.monoW.get(key);
+      if (tw == null) { tw = c0.measureText(label).width / fpx; this.monoW.set(key, tw); if (this.monoW.size > 600) this.monoW.delete(this.monoW.keys().next().value); }
+      const pad = 3, w = Math.ceil(tw * fpx + pad * 2), h = Math.ceil(fpx * 1.12);
+      const dpr = this.dpr || 1;
+      const cv = document.createElement('canvas');
+      cv.width = Math.ceil(w * dpr); cv.height = Math.ceil(h * dpr);
+      const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.fillStyle = 'rgba(0,0,0,.78)'; c.fillRect(0, 0, w, h);
+      c.font = `700 ${fpx}px "IBM Plex Mono", monospace`;
+      c.fillStyle = '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(label, w / 2, h / 2 + 0.5);
+      s = { cv, w, h };
+      if (this.strSprites.size > 600) this.strSprites.delete(this.strSprites.keys().next().value);
+      this.strSprites.set(key, s);
+      return s;
+    }
     drawLabels(c, now) {
       const g = this.opts.state(), { cam, geo, data } = this, z = cam.z;
       if (this.labelsDirty && now - this.labelsAt > 1200) { this.labels = this.computeLabels(); this.labelsDirty = false; this.labelsAt = now; }
@@ -671,7 +771,8 @@ onmessage = (e) => {
         if (!n.alive || (z < 0.8 && !n.great)) continue;
         const pr = geo.provs[n.cap], [x, y] = this.toS(pr.lx, pr.ly);
         if (x < -10 || y < -10 || x > this.sw + 10 || y > this.sh + 10) continue;
-        star(c, x, y, Math.min(8, 3 + z * 0.8), Math.min(3.4, 1.3 + z * 0.35), '#fff7e0', 'rgba(20,10,0,.8)');
+        const sp = this.starSprite(Math.min(8, 3 + z * 0.8), Math.min(3.4, 1.3 + z * 0.35));
+        c.drawImage(sp.cv, x - sp.w / 2, y - sp.w / 2, sp.w, sp.w);
       }
       // nation names, along the country's main axis
       for (const L of this.labels || []) {
@@ -697,6 +798,38 @@ onmessage = (e) => {
       if (!this.sw) return;
       this.stepCamera(now);
       const { ctx, cam, geo } = this, z = cam.z;
+      const armies = this.opts.armies();
+      const battles = this.opts.battles ? this.opts.battles() : [];
+      const hl = this.opts.highlights();
+      // Nothing on the map can have changed since the last frame (camera still, world paused,
+      // no battle pulse, no fading tile): leave the painted frame alone instead of redrawing it
+      // sixty times a second. This is what stops the map "refreshing" while you just look at it.
+      if (this.worthDrawing(now, armies, battles, hl)) { this.drawFrame(now, armies, battles, hl); this.drawnAt = now; }
+    }
+    worthDrawing(now, armies, battles, hl) {
+      if (this.anim || this.wheel) return true;
+      if (battles.length || hl.some(h => h.outline)) return true;          // pulsing overlays: animate
+      // compare with the camera as it was when the last frame was painted — a drag moves the
+      // camera between frames, so comparing against the value at the top of this frame is useless
+      const dc = this.drawnCam;
+      if (!dc || dc.x !== this.cam.x || dc.y !== this.cam.y || dc.z !== this.cam.z) return true;
+      if (this.version !== this.drawnVer || this.labelsDirty) return true;
+      for (const t of this.tiles.values()) if (t.ready && t.shownAt && now - t.shownAt < 130) return true;   // mid-fade
+      let h = 5381;
+      for (const a of armies) {
+        h = ((h * 33) ^ ((a.x * 4096) | 0)) | 0;
+        h = ((h * 33) ^ ((a.y * 4096) | 0)) | 0;
+        h = ((h * 33) ^ ((a.div * 64) | 0) ^ (a.selected ? 7 : 0) ^ (((a.org || 0) * 8) | 0) ^ (a.sea ? 5 : 0)) | 0;
+      }
+      h = ((h * 33) ^ (hl.length * 131 + hl.reduce((t, x) => t + x.p * 7 + (x.fill ? 3 : 0) + (x.outline ? 5 : 0), 0))) | 0;
+      h = ((h * 33) ^ (this.opts.fronts ? this.opts.fronts().length : 0)) | 0;
+      if (h === this.drawnArmyHash) return false;
+      this.drawnArmyHash = h;
+      return true;
+    }
+    drawFrame(now, armies, battles, hl) {
+      const { ctx, cam, geo } = this, z = cam.z;
+      this.drawnVer = this.version; this.drawnCam = { x: cam.x, y: cam.y, z: cam.z };
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = '#1a2c3d'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
       this.drawTiles(ctx, now);
@@ -704,7 +837,6 @@ onmessage = (e) => {
       this.drawLabels(ctx, now);
       const t = now / 1000;
       // highlights
-      const hl = this.opts.highlights();
       if (hl.length) {
         ctx.save(); ctx.translate(-cam.x * z, -cam.y * z); ctx.scale(z, z);
         for (const h of hl) {
@@ -724,7 +856,6 @@ onmessage = (e) => {
         if (f.arrow) this.arrow(ctx, f.arrow[0], f.arrow[1], f.color);
       }
       // army routes
-      const armies = this.opts.armies();
       for (const a of armies) {
         if (!a.route || !a.route.length || !a.showPath) continue;
         ctx.strokeStyle = a.pathColor || 'rgba(255,255,255,.9)'; ctx.lineWidth = 2.2; ctx.setLineDash([6, 4]);
@@ -755,18 +886,19 @@ onmessage = (e) => {
         }
         ctx.globalAlpha = a.sea ? 0.75 : 1;
         if (a.genColor) { ctx.fillStyle = a.genColor; ctx.fillRect(x - s * 0.75, y + s * 0.5, s * 1.5, Math.max(2, s * 0.12)); }
-        NS.drawUnit(ctx, x, y, s, a.type, { affil: a.affil, ech: a.ech, selected: a.selected });
-        ctx.font = `700 ${Math.round(s * 0.55)}px "IBM Plex Mono", monospace`;
+        const us = this.unitSprite(s, a.type, a.affil, a.ech, a.selected);
+        ctx.drawImage(us.cv, x - us.ox, y - us.oy, us.w, us.h);
         const label = (a.sea ? '⚓ ' : '') + (a.div >= 10 ? Math.round(a.div) + '' : a.div.toFixed(1).replace(/\.0$/, ''));
-        const tw = ctx.measureText(label).width + 6, by = y + s * (a.affil === 'hostile' ? 0.86 : 0.62) + 2;
-        ctx.fillStyle = 'rgba(0,0,0,.78)'; ctx.fillRect(x - tw / 2, by, tw, s * 0.62);
-        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(label, x, by + 1); ctx.textBaseline = 'middle';
+        const fpx = Math.max(6, Math.round(s * 0.55));
+        const ps = this.strSprite(label, fpx);
+        const by = y + s * (a.affil === 'hostile' ? 0.86 : 0.62) + 2;
+        ctx.drawImage(ps.cv, x - ps.w / 2, by, ps.w, ps.h);
         if (a.org != null && a.org < 99) { ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(x - s * 0.75, y - s * 0.62 - 5, s * 1.5, 3.5); ctx.fillStyle = a.org > 50 ? '#7fe08a' : a.org > 25 ? '#ffcf5a' : '#ff6a5f'; ctx.fillRect(x - s * 0.75, y - s * 0.62 - 5, s * 1.5 * a.org / 100, 3.5); }
         ctx.globalAlpha = 1;
         this.armyHits.push({ a, x, y, r: s });
       }
       // battles: crossed swords that pulse
-      for (const b of this.opts.battles ? this.opts.battles() : []) {
+      for (const b of battles) {
         const [x, y] = this.llS(b.x, b.y), r = 7 + 2 * Math.sin(t * 6), off = Math.max(12, s * 0.9);
         ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.lineWidth = 5;
         ctx.beginPath(); ctx.moveTo(x - r, y - r - off); ctx.lineTo(x + r, y + r - off); ctx.moveTo(x + r, y - r - off); ctx.lineTo(x - r, y + r - off); ctx.stroke();
