@@ -57,7 +57,7 @@
       const out = await res.json().catch(() => ({}));
       aiState = res.ok && out.ok ? 'on' : 'off';
     } catch (e) { aiState = 'off'; }
-    $('ai-status').textContent = aiState === 'on' ? 'AI game master: online. Other nations are played by Claude.' : 'AI game master: offline right now. You can still play; nations follow simple built-in rules until it is back.';
+    $('ai-status').textContent = aiState === 'on' ? 'AI game master: online. Other nations are played by an AI.' : 'AI game master: offline right now. You can still play; nations follow simple built-in rules until it is back.';
     updateBadge();
   }
   function updateBadge() {

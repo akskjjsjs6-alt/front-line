@@ -58,13 +58,27 @@
       return { online: false, error: e.message, res: offlineTurn(data, g, ctx) };
     }
   }
+  // the AI sometimes signs messages with the leader ("Duce Benito Mussolini") instead of the nation
+  function senderOf(g, from) {
+    const i = W().findNation(g, from);
+    if (i >= 0) return i;
+    const f = String(from || '').toLowerCase();
+    return g.nations.findIndex(n => n.alive && n.leader && f.includes(n.leader.toLowerCase().split(' ').pop()));
+  }
+
   function applyTurn(data, g, res) {
     const notes = [];
+    const seen = new Set();
     for (const ch of res.changes || []) {
+      const key = JSON.stringify([ch.kind, ch.a, ch.b, ch.provinces, ch.text]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // the player starts their own wars from the Diplomacy tab
+      if (ch.kind === 'declare_war' && W().findNation(g, ch.a) === g.player) continue;
       try { const n = W().applyChange(data, g, ch); if (n) notes.push(n); } catch (e) { console.warn('change failed', ch, e); }
     }
     for (const m of res.messages_to_player || []) {
-      const i = W().findNation(g, m.from);
+      const i = senderOf(g, m.from);
       if (i >= 0 && i !== g.player && m.text) g.inbox.push({ from: i, text: String(m.text).slice(0, 1500), date: W().dateLabel(g), read: false });
     }
     if (g.inbox.length > 30) g.inbox.splice(0, g.inbox.length - 30);

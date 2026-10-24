@@ -1,7 +1,7 @@
 # Front Line
 
 An open-world grand strategy game in the browser. Pick a year (1900, 1939 or 2003), pick **any nation**, and play
-month by month while an AI game master (Claude) runs every other country.
+month by month while an AI game master runs every other country.
 
 - **Write orders in plain words.** "Build railways", "demand the Danzig corridor", "fund drones". The AI judges
   what happens and writes a newspaper report each month.
@@ -31,7 +31,7 @@ then open http://localhost:8000. For free hosting, turn on GitHub Pages (Setting
 ## The AI game master
 
 `supabase/functions/ai/index.ts` is a Supabase Edge Function that calls an AI model through
-OpenRouter (default model `recursive/flint-v1.0:free`), Vercel AI Gateway or the Claude API. It needs one secret in the
+OpenRouter (free model `dots-studio/dots-3-note-preview:free`, with `recursive/flint-v1.0:free` as backup), Vercel AI Gateway or the Claude API. It needs one secret in the
 Supabase project (Edge Functions → Secrets): `OPENROUTER_API_KEY`, `AI_GATEWAY_API_KEY` or `ANTHROPIC_API_KEY`.
 Optionally set `AI_MODEL` to use a different model. When the server can't be reached, the game keeps working with simple built-in rules.
 

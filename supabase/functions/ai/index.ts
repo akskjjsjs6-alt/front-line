@@ -14,8 +14,11 @@ const VIA: "openrouter" | "vercel" | "anthropic" =
   : "anthropic";
 const VIA_VERCEL = VIA === "vercel";
 const MODEL = Deno.env.get("AI_MODEL") || Deno.env.get("CLAUDE_MODEL") ||
-  { openrouter: "recursive/flint-v1.0:free", vercel: "anthropic/claude-opus-5.5", anthropic: "claude-opus-5-5" }[VIA];
+  { openrouter: "dots-studio/dots-3-note-preview:free", vercel: "anthropic/claude-opus-5.5", anthropic: "claude-opus-5-5" }[VIA];
 const client = new Anthropic({ apiKey: KEY, ...(VIA_VERCEL ? { baseURL: "https://ai-gateway.vercel.sh" } : {}) });
+
+// When the main free model fails or is busy, try this one (slower, but steady).
+const BACKUP = Deno.env.get("AI_BACKUP_MODEL") || (VIA === "openrouter" && !Deno.env.get("AI_MODEL") ? "recursive/flint-v1.0:free" : "");
 
 class AIError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -23,9 +26,11 @@ class AIError extends Error {
 
 // OpenRouter speaks the OpenAI chat completions format.
 // deno-lint-ignore no-explicit-any
-async function openrouter(body: Record<string, unknown>): Promise<any> {
+async function openrouter(body: Record<string, unknown>, ms = 140_000): Promise<any> {
+  const t0 = Date.now();
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
+    signal: AbortSignal.timeout(ms),
     headers: {
       "Authorization": `Bearer ${KEY}`,
       "Content-Type": "application/json",
@@ -35,7 +40,9 @@ async function openrouter(body: Record<string, unknown>): Promise<any> {
     body: JSON.stringify({ model: MODEL, ...body }),
   });
   const data = await res.json().catch(() => ({}));
+  console.log(`openrouter ${body.model || MODEL} ${res.status} ${Date.now() - t0}ms ${body.response_format ? "schema" : "prompt"}`);
   if (!res.ok || data.error) {
+    console.log("openrouter error", JSON.stringify(data.error ?? data).slice(0, 800));
     throw new AIError(data.error?.code || res.status, data.error?.message || `OpenRouter error ${res.status}`);
   }
   return data;
@@ -125,6 +132,7 @@ Each request gives you the date, the world state, the player's free-text orders 
 - Write a short newspaper-style headline and a 2-4 sentence summary of the month.
 - Write 2-6 events. Include reactions to what the player did, plus plausible developments elsewhere driven by each nation's era, interests and leaders. Not every month needs a war.
 - Judge every player order honestly in player_results. Big ambitions take time, cost money and can fail; impossible orders fail with an in-world reason. Do not let the player win just by writing it.
+- Never act for the player's nation in changes: no declare_war, alliance or treaty by the player's nation unless its orders say so. List each change once.
 - Express the effects as changes. Use only nation and province names exactly as given. Fields you do not need: empty string, empty list or 0.
   declare_war: a declares war on b. make_peace: a and b make peace; provinces listed move from b to a.
   alliance / end_alliance: between a and b. transfer_provinces: provinces move from b to a (treaties, sales, cessions; not conquest, which battles handle).
@@ -134,7 +142,7 @@ Each request gives you the date, the world state, the player's free-text orders 
   recruit: nation a raises value new divisions (1-20).
 - Every other nation is alive and ambitious. Each month, decide what the important nations want and let them act on it, whether or not the player did anything: declare wars, sign alliances and pacts, issue ultimatums, annex weak neighbours, fall into revolution, change leaders, make peace when a war goes badly. Do not wait for the player to start things.
 - You are given the real historical timeline for the coming months. Use it as the default course of history: when its conditions still hold, let those events happen around their dates (for example by emitting declare_war). If the world has changed (because of the player or earlier events), adapt or drop them and invent plausible alternatives.
-- Leaders may write to the player directly in messages_to_player: demands, ultimatums, offers, threats, proposals, congratulations or warnings, in their own voice. Use it when a nation has a real reason to contact the player; 0-3 messages a month.
+- Leaders may write to the player directly in messages_to_player (from = the sending nation's name exactly as given, never the player's own nation): demands, ultimatums, offers, threats, proposals, congratulations or warnings, in their own voice. Use it when a nation has a real reason to contact the player; 0-3 messages a month.
 - Keep it historically grounded for the era but let history diverge. AI nations act in their own interest: they react to threats, form coalitions against aggressors, and take opportunities.
 - Keep text vivid but brief. Never address the player as "you" in events; refer to their nation by name.`;
 
@@ -162,32 +170,54 @@ function parseJson(text: string) {
   throw new Error("The AI's answer was not valid JSON.");
 }
 
-async function ask(system: string, user: string, schema: object, effort: "low" | "medium") {
+// Free OpenRouter models can be picked per request (for trying them out); paid ones only through AI_MODEL.
+type Pick = { model?: string; think?: boolean; effort?: string; ms?: number };
+
+// Thinking is off for the fast default model; models that must think get the requested effort.
+const THINKS = (m: string) => !m.startsWith("dots-studio/");
+
+async function askOpenRouter(system: string, user: string, schema: object, effort: string, pick: Pick) {
+  const think = pick.think ?? THINKS(pick.model!);
+  const base = {
+    max_tokens: 16000,
+    model: pick.model,
+    reasoning: think ? { effort: pick.effort || effort, exclude: true } : { enabled: false },
+  };
+  const text = (d: { choices?: { message?: { content?: string } }[] }) => {
+    const t = d.choices?.[0]?.message?.content || "";
+    if (!t) throw new Error("The AI sent an empty answer.");
+    return t;
+  };
+  try {
+    return parseJson(text(await openrouter({
+      ...base,
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      response_format: { type: "json_schema", json_schema: { name: "answer", strict: true, schema } },
+    }, pick.ms)));
+  } catch (e) {
+    if (e instanceof AIError && (e.status === 401 || e.status === 402 || e.status === 429)) throw e;
+    if (e instanceof Error && e.name === "TimeoutError") throw e;
+    // some models ignore or reject structured output: ask for JSON in the prompt instead
+    return parseJson(text(await openrouter({
+      ...base,
+      messages: [
+        { role: "system", content: system + "\n\nReply with only one JSON object, no other text, that matches this JSON schema:\n" + JSON.stringify(schema) },
+        { role: "user", content: user },
+      ],
+    }, pick.ms)));
+  }
+}
+
+async function ask(system: string, user: string, schema: object, effort: "low" | "medium", pick: Pick = {}) {
   const sys = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
   const msgs = [{ role: "user", content: user }];
   if (VIA === "openrouter") {
-    const base = { max_tokens: 16000, reasoning: { effort, exclude: true } };
-    const text = (d: { choices?: { message?: { content?: string } }[] }) => {
-      const t = d.choices?.[0]?.message?.content || "";
-      if (!t) throw new Error("The AI sent an empty answer.");
-      return t;
-    };
+    const model = pick.model || MODEL;
     try {
-      return parseJson(text(await openrouter({
-        ...base,
-        messages: [{ role: "system", content: system }, { role: "user", content: user }],
-        response_format: { type: "json_schema", json_schema: { name: "answer", strict: true, schema } },
-      })));
+      return await askOpenRouter(system, user, schema, effort, { ...pick, model, ms: BACKUP && BACKUP !== model ? 40_000 : 140_000 });
     } catch (e) {
-      if (e instanceof AIError && (e.status === 401 || e.status === 402 || e.status === 429)) throw e;
-      // some models ignore or reject structured output: ask for JSON in the prompt instead
-      return parseJson(text(await openrouter({
-        ...base,
-        messages: [
-          { role: "system", content: system + "\n\nReply with only one JSON object, no other text, that matches this JSON schema:\n" + JSON.stringify(schema) },
-          { role: "user", content: user },
-        ],
-      })));
+      if (!BACKUP || BACKUP === model || (e instanceof AIError && (e.status === 401 || e.status === 402))) throw e;
+      return await askOpenRouter(system, user, schema, effort, { model: BACKUP, ms: 100_000 });
     }
   }
   if (VIA === "anthropic") {
@@ -233,6 +263,11 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Bad JSON" }, 400);
   }
   const ready = KEY !== "";
+  const pick: Pick = {
+    model: typeof body.model === "string" && body.model.endsWith(":free") ? body.model : undefined,
+    think: typeof body.think === "boolean" ? body.think : undefined,
+    effort: ["minimal", "low", "medium", "high"].includes(body.effort as string) ? body.effort as string : undefined,
+  };
   if (body.mode === "ping") {
     if (!ready) return json({ ok: false, reason: "missing key", model: MODEL });
     try {
@@ -263,7 +298,7 @@ Deno.serve(async (req: Request) => {
         `Recent history:\n${clip(JSON.stringify(body.history ?? []), 8000)}`,
         `Real historical timeline for the next months (the default course of events):\n${clip(JSON.stringify(body.timeline ?? []), 3000)}`,
       ].join("\n\n");
-      return json(await ask(TURN_SYSTEM, user, TURN_SCHEMA, "medium"));
+      return json(await ask(TURN_SYSTEM, user, TURN_SCHEMA, "medium", pick));
     }
     if (body.mode === "chat") {
       const hist = Array.isArray(body.history) ? body.history.slice(-16) : [];
@@ -275,7 +310,7 @@ Deno.serve(async (req: Request) => {
         `Conversation so far:\n${hist.map((m: { role: string; text: string }) => `${m.role === "player" ? "THEM" : "YOU"}: ${clip(m.text, 1500)}`).join("\n") || "(first message)"}`,
         `Their new message:\n${clip(body.message, 1500)}`,
       ].join("\n\n");
-      return json(await ask(CHAT_SYSTEM, user, CHAT_SCHEMA, "low"));
+      return json(await ask(CHAT_SYSTEM, user, CHAT_SCHEMA, "low", pick));
     }
     return json({ error: "Unknown mode" }, 400);
   } catch (e) {
@@ -285,6 +320,7 @@ Deno.serve(async (req: Request) => {
       if (e.status === 402) return json({ error: "The OpenRouter account is out of credits." }, 503);
       return json({ error: `AI error ${e.status}: ${e.message}` }, 502);
     }
+    if (e instanceof Error && e.name === "TimeoutError") return json({ error: "The AI took too long to answer." }, 504);
     if (e instanceof Anthropic.RateLimitError) return json({ error: "The AI is busy. Try again in a minute." }, 429);
     if (e instanceof Anthropic.AuthenticationError) return json({ error: "The AI key is invalid." }, 503);
     if (String(e).includes("customer_verification_required")) return json({ error: "Vercel AI Gateway needs a credit card on the account before it will answer." }, 503);
