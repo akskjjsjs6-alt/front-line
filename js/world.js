@@ -1,11 +1,11 @@
-/* Front Line world simulation: nations, provinces, armies, wars. No DOM. */
+/* Front Line world simulation: nations, provinces, armies, wars, in real time. No DOM. */
 (function (root) {
   'use strict';
 
   // ------------------------------------------------------------------ periods
   const PERIODS = {
     '1900': {
-      id: '1900', file: 'data/world-1900.json', start: [1900, 1], title: 'The Age of Empires', km: 280, recruitCost: 6,
+      id: '1900', file: 'data/world-1900.json', start: [1900, 1], title: 'The Age of Empires', speed: 14, recruitCost: 6,
       blurb: 'Queen Victoria still reigns. Europe\'s empires cover the globe, the Boer War rages and China simmers. Fourteen years of peace remain, unless someone breaks it sooner.',
       units: { inf: 0.7, recon: 0.2, art: 0.1 },
       wars: [['United Kingdom', 'Transvaal'], ['United Kingdom', 'Orange Free State']],
@@ -13,7 +13,7 @@
       hostile: [['France', 'Germany', -45], ['Russia', 'Japan', -40], ['United Kingdom', 'Russia', -25], ['Austria-Hungary', 'Serbia', -30], ['Russia', 'Ottoman Empire', -35], ['United Kingdom', 'France', -15]]
     },
     '1939': {
-      id: '1939', file: 'data/world-1939.json', start: [1939, 3], title: 'The Gathering Storm', km: 450, recruitCost: 8,
+      id: '1939', file: 'data/world-1939.json', start: [1939, 3], title: 'The Gathering Storm', speed: 22, recruitCost: 8,
       blurb: 'Germany has swallowed Austria and eyes Poland. Japan is at war in China. Britain and France promise to defend Poland. The world holds its breath.',
       units: { inf: 0.55, mech: 0.15, armor: 0.12, recon: 0.06, art: 0.1, ad: 0.02 },
       wars: [['Japan', 'China']],
@@ -21,7 +21,7 @@
       hostile: [['Germany', 'Poland', -50], ['Germany', 'France', -40], ['Germany', 'United Kingdom', -25], ['USSR', 'Germany', -35], ['Japan', 'USSR', -45], ['Japan', 'United States', -30], ['Italy', 'France', -25], ['Hungary', 'Romania', -35], ['Germany', 'Czechoslovakia', -60]]
     },
     '2003': {
-      id: '2003', file: 'data/world-2003.json', start: [2003, 1], title: 'The New Century', km: 650, recruitCost: 14,
+      id: '2003', file: 'data/world-2003.json', start: [2003, 1], title: 'The New Century', speed: 32, recruitCost: 14,
       blurb: 'The only superpower prepares to invade Iraq. Russia rebuilds under Putin, China rises fast, and old feuds smoulder from Kashmir to Korea.',
       units: { inf: 0.3, mech: 0.25, armor: 0.2, recon: 0.07, art: 0.08, mlrs: 0.04, ad: 0.02, heli: 0.03, uas: 0.01 },
       wars: [],
@@ -195,13 +195,35 @@
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const rnd = (g) => { g.seed = (g.seed * 1664525 + 1013904223) >>> 0; return g.seed / 4294967296; };
 
+  // ------------------------------------------------------------------ geography
+  // The map module supplies point -> province lookup (plain JS, also works outside a browser).
+  let DATA = null;
+  function attach(data) { DATA = data; }
+  function geoOf(data) { return root.WorldMap ? root.WorldMap.prepare(data) : null; }
+  function locate(data, lon, lat, hint) { const geo = geoOf(data); return geo ? geo.locate(lon, lat, hint) : (hint ?? -1); }
+  const center = (data, p) => [data.provinces[p].x, data.provinces[p].y];
+  // fast flat-earth distance in km between two lon/lat points (fine at army scale)
+  function kmLL(x1, y1, x2, y2) { const dy = (y2 - y1) * 110.57, dx = (x2 - x1) * 111.32 * Math.cos((y1 + y2) * Math.PI / 360); return Math.hypot(dx, dy); }
+
+  // What changed since the map last looked: provinces that changed hands, or everything (wars, treaties).
+  const changed = { provs: [], all: false };
+  function drainChanged() { const out = { provs: changed.provs.splice(0), all: changed.all }; changed.all = false; return out; }
+  const events = [];
+  function drainEvents() { return events.splice(0); }
+  function setCtrl(g, p, to, from) {
+    g.ctrl[p] = to; changed.provs.push(p);
+    if (to === g.player || from === g.player) events.push({ type: 'captured', p, by: to, from });
+  }
+
   // ------------------------------------------------------------------ setup
+  const SEA_KM = 160, ENGAGE_KM = 32, STEP = 0.25;
   function newGame(data, periodId, playerName) {
+    DATA = data;
     const P = PERIODS[periodId], prof = PROFILES[periodId] || {};
     const g = {
-      v: 1, period: periodId, year: P.start[0], month: P.start[1], turn: 1, seed: 12345,
-      player: -1, nations: [], owner: [], ctrl: [], armies: [], nextArmy: 1,
-      news: [], pending: [], chats: {}, orders: '', history: [], over: null
+      v: 3, period: periodId, start: P.start.slice(), year: P.start[0], month: P.start[1], day: 0, turn: 1, seed: 12345,
+      player: -1, nations: [], owner: [], ctrl: [], armies: [], nextArmy: 1, battles: [], nextBattle: 1,
+      news: [], chats: {}, orders: '', history: [], log: [], over: null
     };
     data.nations.forEach((n, i) => {
       const p = prof[n.name];
@@ -219,9 +241,8 @@
     g.ctrl = g.owner.slice();
     const idx = name => g.nations.findIndex(n => n.name === name);
     for (const [a, b] of P.alliances) { const i = idx(a), j = idx(b); if (i >= 0 && j >= 0) ally(g, i, j); }
-    for (const [a, b] of P.wars) { const i = idx(a), j = idx(b); if (i >= 0 && j >= 0) setWar(g, i, j, true); }
+    for (const [a, b] of P.wars) { const i = idx(a), j = idx(b); if (i >= 0 && j >= 0) { setWar(g, i, j, true); g.starter = g.starter || {}; g.starter[key(i, j)] = i; } }
     for (const [a, b, v] of P.hostile) { const i = idx(a), j = idx(b); if (i >= 0 && j >= 0) { setRel(g, i, j, v); setRel(g, j, i, v); } }
-    for (const a of g.armies) a.div = 0;
     // starting armies: the capital plus the most contested borders
     g.nations.forEach((n, i) => {
       const borders = borderProvinces(data, g, i);
@@ -240,25 +261,30 @@
       }
       if (left > 0.5) addArmy(g, i, n.cap, left);
     });
-    mergeArmies(g);
+    mergeArmies(g, true);
     g.player = idx(playerName);
     g.generals = []; g.inbox = [];
     if (g.player >= 0) initGenerals(data, g);
     for (const n of g.nations) n.money = Math.round(income(data, g, g.nations.indexOf(n)) * 3);
+    changed.all = true; changed.provs.length = 0; events.length = 0;
     return g;
   }
 
-  function addArmy(g, n, p, div) {
-    const a = { id: g.nextArmy++, n, p, div: Math.max(0.5, div), org: 100, path: [], moved: false };
+  function addArmy(g, n, p, div, pt) {
+    const [x, y] = pt || center(DATA, p);
+    const a = { id: g.nextArmy++, n, p, x, y, div: Math.max(0.5, div), org: 100, route: [], goal: -1, battle: 0, idle: 10, sea: false, retreat: 0 };
     g.armies.push(a); return a;
   }
-  function mergeArmies(g) {
-    const seen = new Map();
+  function placeAt(a, p) { a.p = p; [a.x, a.y] = center(DATA, p); a.route = []; a.goal = -1; a.sea = false; a.battle = 0; a.retreat = 0; }
+  // AI armies standing still close together join up (the player's armies are left as the player arranged them).
+  function mergeArmies(g, all) {
+    const byNation = new Map();
     for (const a of g.armies) {
-      const k = a.n + ':' + a.p;
-      const b = seen.get(k);
-      if (b && !a.path.length && !b.path.length) { b.org = (b.org * b.div + a.org * a.div) / (b.div + a.div); b.div += a.div; a.div = 0; }
-      else if (!b) seen.set(k, a);
+      if (a.div <= 0.05 || a.battle || a.route.length || a.sea || (!all && a.n === g.player)) continue;
+      let l = byNation.get(a.n); if (!l) byNation.set(a.n, l = []);
+      const b = l.find(o => kmLL(o.x, o.y, a.x, a.y) < 25);
+      if (b) { b.org = (b.org * b.div + a.org * a.div) / (b.div + a.div); b.div += a.div; a.div = 0; }
+      else l.push(a);
     }
     g.armies = g.armies.filter(a => a.div > 0.05);
   }
@@ -268,8 +294,8 @@
   function rel(g, a, b) { return g.nations[a].rel[b] || 0; }
   function setRel(g, a, b, v) { g.nations[a].rel[b] = Math.max(-100, Math.min(100, Math.round(v))); }
   function addRel(g, a, b, d) { setRel(g, a, b, rel(g, a, b) + d); }
-  function atWar(g, a, b) { return g.nations[a].wars.includes(b); }
-  function allied(g, a, b) { return g.nations[a].allies.includes(b); }
+  function atWar(g, a, b) { return a >= 0 && b >= 0 && g.nations[a].wars.includes(b); }
+  function allied(g, a, b) { return a >= 0 && b >= 0 && g.nations[a].allies.includes(b); }
   function ally(g, a, b) {
     if (a === b || allied(g, a, b)) return;
     g.nations[a].allies.push(b); g.nations[b].allies.push(a);
@@ -282,6 +308,7 @@
   function setWar(g, a, b, on) {
     if (a === b || a < 0 || b < 0) return;
     const A = g.nations[a], B = g.nations[b];
+    changed.all = true;
     if (on) {
       if (!A.wars.includes(b)) A.wars.push(b);
       if (!B.wars.includes(a)) B.wars.push(a);
@@ -295,8 +322,8 @@
       }
       // armies standing in the other's land go home
       for (const army of g.armies) {
-        const o = g.owner[army.p];
-        if ((army.n === a && o === b) || (army.n === b && o === a)) { army.p = g.nations[army.n].cap; army.path = []; }
+        const o = army.p >= 0 ? g.owner[army.p] : -1;
+        if ((army.n === a && o === b) || (army.n === b && o === a)) placeAt(army, g.nations[army.n].cap);
       }
     }
   }
@@ -320,11 +347,10 @@
   function makePeace(g, a, b) { setWar(g, a, b, false); setRel(g, a, b, Math.max(rel(g, a, b), -30)); setRel(g, b, a, Math.max(rel(g, b, a), -40)); }
 
   function transfer(g, data, p, to) {
-    g.owner[p] = to; g.ctrl[p] = to;
+    g.owner[p] = to; g.ctrl[p] = to; changed.provs.push(p);
     for (const army of g.armies) if (army.p === p && army.n !== to && !atWar(g, army.n, to) && !allied(g, army.n, to)) {
       const home = g.nations[army.n].cap;
-      army.p = g.owner[home] === army.n ? home : nearestOwned(data, g, army.n, p);
-      army.path = [];
+      placeAt(army, g.owner[home] === army.n ? home : nearestOwned(data, g, army.n, p));
     }
     for (const n of g.nations) if (n.cap === p && g.nations.indexOf(n) !== to) {
       const ni = g.nations.indexOf(n), mine = provincesOf(g, ni);
@@ -368,7 +394,7 @@
 
   // ------------------------------------------------------------------ economy
   function provValue(data, p) { const pr = data.provinces[p]; return Math.min(5, 0.3 + Math.log10(1 + (pr.pop || 0)) * 0.5 + pr.a / 500); }
-  // Income comes mostly from the national economy (scaled by how much of the country you still control), plus land.
+  // Monthly income comes mostly from the national economy (scaled by how much of the country you still control), plus land.
   function income(data, g, n) {
     let land = 0, own = 0, held = 0;
     for (let p = 0; p < g.owner.length; p++) {
@@ -389,13 +415,16 @@
     const p = where != null && g.owner[where] === n && g.ctrl[where] === n ? where : N.cap;
     if (g.ctrl[p] !== n) return false;
     N.money -= cost;
+    // reinforce an army standing there, or raise a new one
+    const here = g.armies.find(a => a.n === n && a.p === p && !a.route.length && !a.battle);
+    if (here) { here.org = (here.org * here.div + 60 * count) / (here.div + count); here.div += count; return here; }
     const a = addArmy(g, n, p, count); a.org = 60;
-    mergeArmies(g);
-    return true;
+    return a;
   }
 
   // ------------------------------------------------------------------ movement
   function canEnter(g, n, p) {
+    if (p < 0) return false;
     const o = g.ctrl[p];
     if (o < 0) return true;                       // unclaimed land
     if (o === n || allied(g, n, o)) return true;
@@ -403,161 +432,252 @@
     if (atWar(g, n, o) || atWar(g, n, g.owner[p])) return true;
     return false;
   }
-  // Provinces an army can reach this turn: map province -> path
-  // A coastal province you control works as a port: armies there can ship to any coast they may enter (takes the whole turn).
-  function isPort(data, g, n, p) { return data.provinces[p].c && (g.ctrl[p] === n || (g.ctrl[p] >= 0 && allied(g, n, g.ctrl[p]))); }
-  function seaTargets(data, g, n, from) {
-    const out = [];
-    if (!isPort(data, g, n, from)) return out;
-    for (let p = 0; p < data.provinces.length; p++) if (p !== from && data.provinces[p].c && canEnter(g, n, p)) out.push(p);
-    return out;
-  }
-  // Provinces an army can reach this turn (Dijkstra on km): map province -> path
-  function reachable(data, g, army) {
-    const budget = PERIODS[g.period].km, best = new Map([[army.p, 0]]), out = new Map([[army.p, []]]);
-    const open = [[0, army.p]];
-    while (open.length) {
-      open.sort((a, b) => a[0] - b[0]);
-      const [d, p] = open.shift();
-      if (d > best.get(p)) continue;
-      if (p !== army.p && hostileHere(g, army.n, p)) continue;   // stop when entering enemy ground
+  // A coastal province you or an ally control works as a port for shipping troops overseas.
+  function isPort(data, g, n, p) { return p >= 0 && data.provinces[p].c && (g.ctrl[p] === n || (g.ctrl[p] >= 0 && allied(g, n, g.ctrl[p]))); }
+  // Cheapest land route between provinces (Dijkstra on km). Returns the provinces after `from`, or null.
+  function routeProv(data, g, n, from, test, maxKm) {
+    const N = data.provinces.length, dist = new Float64Array(N).fill(Infinity), prev = new Int32Array(N).fill(-1);
+    const heap = [[0, from]]; dist[from] = 0;
+    const push = it => { heap.push(it); let i = heap.length - 1; while (i) { const j = (i - 1) >> 1; if (heap[j][0] <= heap[i][0]) break; [heap[i], heap[j]] = [heap[j], heap[i]]; i = j; } };
+    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[i], heap[m]] = [heap[m], heap[i]]; i = m; } } return top; };
+    while (heap.length) {
+      const [d, p] = pop();
+      if (d > dist[p]) continue;
+      if (p !== from && test(p)) { const path = []; for (let c = p; c !== from; c = prev[c]) path.unshift(c); return path; }
+      const pr = data.provinces[p];
       for (const x of neighbours(data, p)) {
-        if (!canEnter(g, army.n, x)) continue;
-        const nd = d + km(data, p, x) * (data.provinces[p].nb.includes(x) ? 1 : 1.4);
-        if (nd > budget && d > 0) continue;                       // always allow one step
-        if (best.has(x) && best.get(x) <= nd) continue;
-        best.set(x, nd); out.set(x, out.get(p).concat([x])); open.push([nd, x]);
+        if (!canEnter(g, n, x)) continue;
+        const c = g.ctrl[x];
+        const nd = d + km(data, p, x) * (pr.nb.includes(x) ? 1 : 1.6) * (c >= 0 && atWar(g, n, c) ? 1.3 : 1);
+        if (nd > (maxKm || Infinity) || nd >= dist[x]) continue;
+        dist[x] = nd; prev[x] = p; push([nd, x]);
       }
-    }
-    // overseas: coasts not reachable on foot this turn
-    for (const p of seaTargets(data, g, army.n, army.p)) if (!out.has(p)) { const sp = [p]; sp.sea = true; out.set(p, sp); }
-    return out;
-  }
-  function hostileHere(g, n, p) {
-    const c = g.ctrl[p];
-    if (c >= 0 && atWar(g, n, c)) return true;
-    return g.armies.some(a => a.p === p && atWar(g, n, a.n));
-  }
-  // Shortest path ignoring the per-turn limit (for AI planning)
-  function pathTo(data, g, n, from, test, maxLen) {
-    const prev = new Map([[from, -1]]), q = [from];
-    while (q.length) {
-      const p = q.shift();
-      if (p !== from && test(p)) { const path = []; for (let c = p; c !== from; c = prev.get(c)) path.unshift(c); return path; }
-      if (maxLen && pathLen(prev, p) >= maxLen) continue;
-      for (const x of neighbours(data, p)) if (!prev.has(x) && canEnter(g, n, x)) { prev.set(x, p); q.push(x); }
     }
     return null;
   }
-  function pathLen(prev, p) { let n = 0; for (let c = p; prev.get(c) !== -1 && prev.has(c); c = prev.get(c)) n++; return n; }
-
-  function moveArmies(data, g, which) {
-    const budget = PERIODS[g.period].km;
-    for (const a of g.armies) {
-      if (!which(a) || !a.path.length) continue;
-      let used = 0, n = 0;
-      while (a.path.length) {
-        const nx = a.path[0];
-        if (!canEnter(g, a.n, nx)) { a.path = []; break; }
-        const bySea = !neighbours(data, a.p).includes(nx);
-        if (bySea && n > 0) break;                 // embarking takes the whole turn
-        const cost = bySea ? budget : km(data, a.p, nx);
-        if (n > 0 && used + cost > budget) break;
-        a.p = nx; a.path.shift(); n++; used += cost; a.moved = true;
-        if (bySea) { a.org = Math.max(10, a.org - 20); break; }
-        if (hostileHere(g, a.n, nx)) break;
-      }
+  // Can an army march in a straight line between two points (no sea, no forbidden land)?
+  function clearLine(data, g, n, x0, y0, x1, y1) {
+    const steps = Math.min(60, Math.ceil(kmLL(x0, y0, x1, y1) / 20));
+    let hint = -1;
+    for (let i = 1; i < steps; i++) {
+      const f = i / steps, q = locate(data, x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, hint);
+      if (q < 0 || !canEnter(g, n, q)) return false;
+      hint = q;
     }
+    return true;
   }
-
-  // ------------------------------------------------------------------ battles
-  function sidePower(g, armies) {
-    return armies.reduce((s, a) => s + a.div * g.nations[a.n].tech * (0.45 + a.org / 180) * (0.85 + g.nations[a.n].mil / 330), 0);
-  }
-  // All battles: provinces where armies of nations at war meet.
-  function findBattles(g) {
-    const byProv = new Map();
-    for (const a of g.armies) { if (!byProv.has(a.p)) byProv.set(a.p, []); byProv.get(a.p).push(a); }
+  // Straighten a route: skip waypoints whenever the direct line is clear.
+  function smooth(data, g, a, pts) {
     const out = [];
-    for (const [p, list] of byProv) {
-      if (list.length < 2) continue;
-      // split into two coalitions around the first hostile pair
-      let A = null, B = null;
-      for (const x of list) for (const y of list) if (!A && atWar(g, x.n, y.n)) { A = x.n; B = y.n; }
-      if (A == null) continue;
-      const side = n => (n === A || (allied(g, n, A) && !atWar(g, n, A)) || atWar(g, n, B) && !atWar(g, n, A)) ? 1 : (n === B || atWar(g, n, A)) ? 2 : 0;
-      const s1 = list.filter(a => side(a.n) === 1), s2 = list.filter(a => side(a.n) === 2);
-      if (!s1.length || !s2.length) continue;
-      // the defender is whoever controls the province (or didn't move in)
-      const ctrl = g.ctrl[p];
-      const s1Defends = s1.some(a => a.n === ctrl || allied(g, a.n, ctrl)) || (!s2.some(a => a.n === ctrl) && s1.every(a => !a.moved));
-      out.push({ p, attackers: s1Defends ? s2 : s1, defenders: s1Defends ? s1 : s2 });
+    let ax = a.x, ay = a.y, i = 0;
+    while (i < pts.length) {
+      let j = i;
+      if (!pts[i][2]) while (j + 1 < pts.length && j - i < 14 && !pts[j + 1][2] && clearLine(data, g, a.n, ax, ay, pts[j + 1][0], pts[j + 1][1])) j++;
+      out.push(pts[j]); ax = pts[j][0]; ay = pts[j][1]; i = j + 1;
     }
     return out;
   }
-  function battleOdds(g, b) {
-    const capital = g.nations.some(n => n.cap === b.p);
-    const a = sidePower(g, b.attackers), d = sidePower(g, b.defenders) * 1.25 * (capital ? 1.15 : 1) * (b.defenders.every(x => !x.moved) ? 1.1 : 1);
-    return { a, d, chance: a / (a + d) };
-  }
-  // Fast statistical resolution.
-  function autoResolve(g, b) {
-    const { chance } = battleOdds(g, b);
-    const roll = chance + (rnd(g) - 0.5) * 0.16;
-    const attackerWins = roll > 0.5;
-    const lossA = 0.07 + 0.28 * (1 - chance), lossD = 0.07 + 0.28 * chance;
-    return finishBattle(g, b, attackerWins, lossA, lossD, 'auto');
-  }
-  // Apply a result (from auto-resolve or a fought battle). lossX are fractions of strength lost.
-  function finishBattle(g, b, attackerWins, lossA, lossD, how) {
-    const totA = b.attackers.reduce((s, a) => s + a.div, 0), totD = b.defenders.reduce((s, a) => s + a.div, 0);
-    for (const a of b.attackers) { a.div *= 1 - lossA; a.org = Math.max(10, a.org - (attackerWins ? 15 : 35)); a.path = attackerWins ? a.path : []; }
-    for (const a of b.defenders) { a.div *= 1 - lossD; a.org = Math.max(10, a.org - (attackerWins ? 35 : 15)); }
-    const losers = attackerWins ? b.defenders : b.attackers;
-    const retreats = [];
-    for (const a of losers) {
-      const r = retreatTarget(g, a, b.p);
-      if (r == null || a.div < 0.4) { a.div = 0; retreats.push([a, null]); } else { a.p = r; a.path = []; retreats.push([a, r]); }
+  // Send an army to a province (to an exact point if given). Returns false if it cannot get there,
+  // 'sea' if it has to ship from a port.
+  function orderTo(data, g, a, prov, pt) {
+    if (prov < 0 || !canEnter(g, a.n, prov)) return false;
+    const dest = pt || center(data, prov), from = a.p;
+    if (prov === from || from < 0) { a.route = [[dest[0], dest[1], 0]]; a.goal = prov; return true; }
+    const path = routeProv(data, g, a.n, from, q => q === prov);
+    if (path) {
+      let prev = from;
+      const pts = path.map(q => { const c = center(data, q), sea = data.provinces[prev].nb.includes(q) ? 0 : 1; prev = q; return [c[0], c[1], sea]; });
+      pts[pts.length - 1] = [dest[0], dest[1], pts[pts.length - 1][2]];
+      a.route = smooth(data, g, a, pts); a.goal = prov;
+      return true;
     }
-    g.armies = g.armies.filter(a => a.div > 0.05);
-    const result = {
-      p: b.p, attackerWins, how,
-      att: [...new Set(b.attackers.map(a => a.n))], def: [...new Set(b.defenders.map(a => a.n))],
-      lostA: +(totA * lossA).toFixed(1), lostD: +(totD * lossD).toFixed(1), destroyed: retreats.filter(r => r[1] == null).length
-    };
-    return result;
+    // overseas: march to a port, then sail
+    const N = g.nations[a.n];
+    if (!data.provinces[prov].c || !(N.great || N.tech >= 0.95 || a.n === g.player)) return false;
+    let land = [];
+    if (!isPort(data, g, a.n, from)) { land = routeProv(data, g, a.n, from, q => isPort(data, g, a.n, q), 4000); if (!land) return false; }
+    const pts = land.map(q => { const c = center(data, q); return [c[0], c[1], 0]; });
+    a.route = smooth(data, g, a, pts).concat([[dest[0], dest[1], 1]]); a.goal = prov;
+    return 'sea';
   }
-  function retreatTarget(g, army, from) {
-    if (!root.WorldData) return null;
-    const data = root.WorldData;
+  function stop(a) { a.route = []; a.goal = -1; }
+
+  // Move one army along its route for dt days.
+  function moveArmy(data, g, a, dt) {
+    if (a.battle) return;
+    if (a.retreat > 0) a.retreat = Math.max(0, a.retreat - dt);
+    if (!a.route.length) { a.idle += dt; a.manual = false; a.sea = false; return; }
+    a.idle = 0;
+    const c = a.p >= 0 ? g.ctrl[a.p] : -1;
+    let left = dt * (a.route[0][2] ? SEA_KM : PERIODS[g.period].speed) * (a.retreat > 0 ? 1.25 : 1) * (c >= 0 && atWar(g, a.n, c) ? 0.75 : 1);
+    while (left > 1e-6 && a.route.length) {
+      const [tx, ty, sea] = a.route[0];
+      a.sea = !!sea;
+      const d = kmLL(a.x, a.y, tx, ty), step = Math.min(d, left);
+      const nx = d > 0 ? a.x + (tx - a.x) * step / d : tx, ny = d > 0 ? a.y + (ty - a.y) * step / d : ty;
+      if (!sea) {
+        const q = locate(data, nx, ny, a.p);
+        if (q >= 0 && q !== a.p && !canEnter(g, a.n, q)) { stop(a); a.blocked = true; return; }
+        if (q >= 0) a.p = q;
+      }
+      a.x = nx; a.y = ny; left -= step;
+      if (step >= d - 1e-6) {
+        a.route.shift();
+        if (sea) { a.sea = false; const q = locate(data, a.x, a.y, a.p); if (q >= 0) a.p = q; }
+      }
+    }
+  }
+  // Armies take enemy land they stand on, unless enemy troops are there too.
+  function capture(g, a, byProv) {
+    const p = a.p; if (p < 0 || a.sea || a.battle) return;
+    const c = g.ctrl[p], o = g.owner[p];
+    if (c >= 0 && c !== a.n && atWar(g, a.n, c)) {
+      if ((byProv.get(p) || []).some(b => !b.sea && atWar(g, a.n, b.n))) return;
+      const to = (o === a.n || (o >= 0 && allied(g, a.n, o) && !atWar(g, a.n, o))) ? o : a.n;
+      setCtrl(g, p, to, c);
+    } else if (c < 0 && o < 0) { g.owner[p] = a.n; setCtrl(g, p, a.n, -1); }
+  }
+
+  // ------------------------------------------------------------------ battles (real time)
+  function sidePower(g, armies) {
+    return armies.reduce((s, a) => s + a.div * g.nations[a.n].tech * (0.45 + a.org / 180) * (0.85 + g.nations[a.n].mil / 330), 0);
+  }
+  const dig = a => 1 + Math.min(0.3, a.idle * 0.03);           // dug-in defenders fight better
+  const friendlyGround = (g, a) => { const c = a.p >= 0 ? g.ctrl[a.p] : -1; return c === a.n || (c >= 0 && allied(g, a.n, c)); };
+  function battleById(g, id) { return g.battles.find(b => b.id === id); }
+  function armyById(g, id) { return g.armies.find(a => a.id === id); }
+  function sideFor(g, bt, x) {
+    const A = bt.A.map(id => armyById(g, id)).filter(Boolean), D = bt.D.map(id => armyById(g, id)).filter(Boolean);
+    const hA = A.some(a => atWar(g, x.n, a.n)), hD = D.some(a => atWar(g, x.n, a.n));
+    return hA && !hD ? 'D' : hD && !hA ? 'A' : null;
+  }
+  function join(g, a, b) {
+    if (a.battle && b.battle) {
+      if (a.battle === b.battle) return;
+      const keep = battleById(g, a.battle), gone = battleById(g, b.battle);
+      if (!keep || !gone) return;
+      for (const id of gone.A.concat(gone.D)) { const x = armyById(g, id); if (!x) continue; const s = sideFor(g, keep, x); x.battle = s ? keep.id : 0; if (s) keep[s].push(id); }
+      g.battles = g.battles.filter(t => t !== gone);
+      return;
+    }
+    if (a.battle || b.battle) {
+      const [inB, x] = a.battle ? [a, b] : [b, a], bt = battleById(g, inB.battle);
+      if (!bt) { inB.battle = 0; return; }
+      const s = sideFor(g, bt, x); if (s) { bt[s].push(x.id); x.battle = bt.id; }
+      return;
+    }
+    // the defender is whoever stands on friendly ground (or has been standing still longer)
+    const ha = friendlyGround(g, a), hb = friendlyGround(g, b);
+    let att = a, def = b;
+    if ((ha && !hb) || (ha === hb && a.idle > b.idle)) { att = b; def = a; }
+    const bt = { id: g.nextBattle++, A: [att.id], D: [def.id], x: def.x * 0.6 + att.x * 0.4, y: def.y * 0.6 + att.y * 0.4, p: def.p >= 0 ? def.p : att.p, days: 0, lossA: 0, lossD: 0 };
+    att.battle = def.battle = bt.id;
+    g.battles.push(bt);
+    const mine = att.n === g.player || def.n === g.player || allied(g, att.n, g.player) || allied(g, def.n, g.player);
+    events.push({ type: 'battle-start', id: bt.id, mine });
+  }
+  function engage(g) {
+    const K = 0.6, cells = new Map();
+    for (const a of g.armies) {
+      if (a.sea || a.retreat > 0) continue;
+      const k = Math.floor(a.x / K) * 1000 + Math.floor(a.y / K);
+      let l = cells.get(k); if (!l) cells.set(k, l = []); l.push(a);
+    }
+    for (const a of g.armies) {
+      if (a.sea || a.retreat > 0) continue;
+      const cx = Math.floor(a.x / K), cy = Math.floor(a.y / K);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        for (const b of cells.get((cx + dx) * 1000 + cy + dy) || []) {
+          if (b.id <= a.id || b.div <= 0 || a.div <= 0 || !atWar(g, a.n, b.n)) continue;
+          if (a.battle && a.battle === b.battle) continue;
+          if (kmLL(a.x, a.y, b.x, b.y) < ENGAGE_KM) join(g, a, b);
+        }
+      }
+    }
+  }
+  // Odds for the attacking side, from 0 to 1.
+  function battleOdds(g, b) {
+    const A = b.attackers || b.A.map(id => armyById(g, id)).filter(Boolean), D = b.defenders || b.D.map(id => armyById(g, id)).filter(Boolean);
+    const capital = g.nations.some(n => n.alive && n.cap === b.p);
+    const a = sidePower(g, A), d = D.reduce((s, x) => s + sidePower(g, [x]) * dig(x), 0) * 1.15 * (capital ? 1.15 : 1);
+    return { a, d, chance: a / (a + d + 1e-9) };
+  }
+  function liveBattle(g, id) {
+    const b = battleById(g, id); if (!b) return null;
+    return { id: b.id, p: b.p, x: b.x, y: b.y, days: b.days, attackers: b.A.map(i => armyById(g, i)).filter(Boolean), defenders: b.D.map(i => armyById(g, i)).filter(Boolean) };
+  }
+  function updateBattles(data, g, dt) {
+    for (const bt of g.battles.slice()) {
+      const A = bt.A.map(id => armyById(g, id)).filter(a => a && a.battle === bt.id && a.div > 0.05);
+      const D = bt.D.map(id => armyById(g, id)).filter(a => a && a.battle === bt.id && a.div > 0.05);
+      bt.A = A.map(a => a.id); bt.D = D.map(a => a.id);
+      if (!A.length || !D.length) { endBattle(data, g, bt, !D.length, 'auto'); continue; }
+      if (!A.some(a => D.some(d => atWar(g, a.n, d.n)))) { for (const x of A.concat(D)) x.battle = 0; g.battles = g.battles.filter(t => t !== bt); continue; }
+      bt.days += dt;
+      const { chance } = battleOdds(g, { attackers: A, defenders: D, p: bt.p });
+      const r = chance / (1 - chance + 1e-9);
+      const fD = 0.018 * Math.min(3, r), fA = 0.018 * Math.min(3, 1 / r);
+      for (const a of A) { const l = a.div * fA * dt; a.div -= l; bt.lossA += l; a.org = Math.max(0, a.org - fA * dt * 370); }
+      for (const a of D) { const l = a.div * fD * dt; a.div -= l; bt.lossD += l; a.org = Math.max(0, a.org - fD * dt * 370); }
+      const avgOrg = l => l.reduce((s, a) => s + a.org * a.div, 0) / (l.reduce((s, a) => s + a.div, 0) || 1);
+      if (avgOrg(D) < 15) endBattle(data, g, bt, true, 'auto');
+      else if (avgOrg(A) < 15 || bt.days > 40) endBattle(data, g, bt, false, 'auto');
+    }
+  }
+  function retreatTarget(data, g, army) {
     let best = null, bs = -Infinity;
-    for (const x of neighbours(data, from)) {
+    const from = army.p >= 0 ? army.p : g.nations[army.n].cap;
+    for (const x of [from].concat(neighbours(data, from))) {
       const c = g.ctrl[x];
       if (!(c === army.n || (c >= 0 && allied(g, army.n, c)))) continue;
-      if (g.armies.some(a => a.p === x && atWar(g, army.n, a.n))) continue;
-      const s = (c === army.n ? 2 : 1) + (g.owner[x] === army.n ? 1 : 0);
+      if (g.armies.some(a => a.p === x && a.div > 0 && atWar(g, army.n, a.n))) continue;
+      const s = (c === army.n ? 2 : 1) + (g.owner[x] === army.n ? 1 : 0) + (x === from ? -0.5 : 0);
       if (s > bs) { bs = s; best = x; }
     }
     return best;
   }
-
-  // Occupation and capitulation after battles.
-  function occupy(data, g) {
-    const events = [];
-    for (const a of g.armies) {
-      const c = g.ctrl[a.p];
-      if (c >= 0 && c !== a.n && atWar(g, a.n, c) && !g.armies.some(b => b.p === a.p && (b.n === c || allied(g, b.n, c)) && !atWar(g, b.n, a.n))) {
-        // liberate an ally's land, else take control ourselves
-        const owner = g.owner[a.p];
-        g.ctrl[a.p] = (owner === a.n || allied(g, a.n, owner)) ? owner : a.n;
-        events.push({ p: a.p, by: g.ctrl[a.p], from: c });
-      } else if (c < 0 && g.owner[a.p] < 0) {
-        // unclaimed land: claim it
-        g.owner[a.p] = a.n; g.ctrl[a.p] = a.n;
-      }
+  function endBattle(data, g, bt, attackerWins, how) {
+    const A = bt.A.map(id => armyById(g, id)).filter(Boolean), D = bt.D.map(id => armyById(g, id)).filter(Boolean);
+    const losers = attackerWins ? D : A, winners = attackerWins ? A : D;
+    let destroyed = 0;
+    for (const a of winners) a.battle = 0;
+    for (const a of losers) {
+      a.battle = 0;
+      const t = a.div < 0.3 ? null : retreatTarget(data, g, a);
+      if (t == null) { a.div = 0; destroyed++; continue; }
+      const c = center(data, t);
+      // fall back away from the fight
+      const bx = c[0] + (c[0] - bt.x) * 0.15, by = c[1] + (c[1] - bt.y) * 0.15;
+      a.route = [[locate(data, bx, by, t) === t ? bx : c[0], locate(data, bx, by, t) === t ? by : c[1], 0]]; a.goal = t;
+      a.retreat = 4; a.manual = false; a.org = Math.max(a.org, 5);
     }
-    return events;
+    g.armies = g.armies.filter(a => a.div > 0.05);
+    g.battles = g.battles.filter(t => t !== bt);
+    const res = {
+      id: bt.id, p: bt.p, x: bt.x, y: bt.y, attackerWins, how, days: Math.round(bt.days),
+      att: [...new Set(A.map(a => a.n))], def: [...new Set(D.map(a => a.n))],
+      lostA: +bt.lossA.toFixed(1), lostD: +bt.lossD.toFixed(1), destroyed
+    };
+    res.mine = res.att.concat(res.def).some(n => n === g.player || allied(g, n, g.player));
+    g.log.push(battleText(data, g, res));
+    if (g.log.length > 40) g.log.shift();
+    events.push({ type: 'battle-end', res });
+    return res;
   }
+  function battleText(data, g, r) {
+    const nm = l => l.map(i => g.nations[i] ? g.nations[i].name : '?').join(' & ');
+    return `Battle of ${data.provinces[r.p] ? data.provinces[r.p].n : 'the field'}: ${nm(r.att)} attacked ${nm(r.def)} and ${r.attackerWins ? 'won' : 'was thrown back'} (losses ${r.lostA} vs ${r.lostD} divisions${r.how === 'fought' ? '; commanded in person' : ''}).`;
+  }
+  // Apply the result of a battle fought on the tactical map. lossX are fractions of strength lost.
+  function finishBattle(g, b, attackerWins, lossA, lossD, how) {
+    const bt = battleById(g, b.id);
+    for (const a of b.attackers) { const l = a.div * lossA; a.div -= l; if (bt) bt.lossA += l; a.org = Math.max(5, a.org - (attackerWins ? 15 : 35)); }
+    for (const a of b.defenders) { const l = a.div * lossD; a.div -= l; if (bt) bt.lossD += l; a.org = Math.max(5, a.org - (attackerWins ? 35 : 15)); }
+    if (!bt) return { p: b.p, attackerWins, how, att: [], def: [], lostA: 0, lostD: 0, destroyed: 0 };
+    return endBattle(DATA, g, bt, attackerWins, how);
+  }
+
+  // ------------------------------------------------------------------ capitulation
   function capitulations(data, g) {
     const out = [];
     g.nations.forEach((n, i) => {
@@ -578,117 +698,96 @@
       }
       for (const e of enemies) makePeace(g, i, e);
       g.nations[i].stab = Math.max(10, g.nations[i].stab - 25);
-      out.annexed = out.annexed || [];
-      if (all) out.annexed.push(i);
+      events.push({ type: 'capitulation', n: i, annexed: all, by: enemies });
+      g.log.push(`${g.nations[i].name} capitulates${all ? ' and is annexed' : ''}.`);
     }
     checkAlive(g);
     return out;
   }
 
   // ------------------------------------------------------------------ AI military
-  function aiMilitary(data, g) {
-    g.nations.forEach((n, i) => {
-      if (i === g.player || !n.alive) return;
-      // recruit
-      const wantMore = n.wars.length ? 1.6 : 1.0;
-      const target = n.startDiv * wantMore * (0.6 + n.mil / 125);
-      const have = divisions(g, i);
-      if (have < target) {
-        const cost = PERIODS[g.period].recruitCost;
-        const can = Math.floor(Math.max(0, n.money - 10) / cost);
-        const add = Math.min(can, Math.ceil((target - have) / 2), 10);
-        if (add >= 1) recruit(data, g, i, add);
-      }
-    });
-    // orders, nation by nation: hold the front first, then attack with what is left
-    g.nations.forEach((n, i) => {
-      if (i === g.player || !n.alive) return;
-      const mine = g.armies.filter(a => a.n === i);
-      if (!n.wars.length) { for (const a of mine) if (!a.path.length && g.ctrl[a.p] !== i && !allied(g, i, g.ctrl[a.p])) a.path = pathTo(data, g, i, a.p, p => g.ctrl[p] === i, 40) || []; return; }
-      const bold = n.wars.some(w => (g.starter || {})[key(i, w)] === i);
-      const enemyAt = p => g.armies.filter(e => e.p === p && atWar(g, i, e.n));
-      const isEnemyLand = p => { const c = g.ctrl[p]; return c >= 0 && atWar(g, i, c); };
-      // front provinces we hold, with the enemy power next to them
-      const front = [];
-      for (let p = 0; p < g.ctrl.length; p++) {
-        if (g.ctrl[p] !== i) continue;
-        let threat = 0, touches = false;
-        for (const q of data.provinces[p].nb) {
-          if (isEnemyLand(q)) touches = true;
-          const e = enemyAt(q); if (e.length) { threat += sidePower(g, e); touches = true; }
-        }
-        if (touches) front.push({ p, threat: threat + (p === n.cap ? 2 : 0.5) });
-      }
-      front.sort((a, b) => b.threat - a.threat);
-      const free = new Set(mine.filter(a => a.org > 25 || g.ctrl[a.p] === i));
-      for (const a of mine) a.path = [];
-      // 1. defence: put enough strength on each threatened front province (defenders fight at x1.25)
-      for (const f of front) {
-        let have = mine.filter(a => a.p === f.p).reduce((s, a) => s + sidePower(g, [a]), 0);
-        for (const a of mine) if (a.p === f.p) free.delete(a);
-        const need = f.threat / 1.25 * (bold ? 0.7 : 1);
-        while (have < need && free.size) {
-          let best = null, bd = 99;
-          for (const a of free) { const d = dist(data, a.p, f.p); if (d < bd) { bd = d; best = a; } }
-          if (!best || bd > 9) break;
-          free.delete(best);
-          const pth = pathTo(data, g, i, best.p, p => p === f.p, 14);
-          if (pth) { best.path = pth; have += sidePower(g, [best]); }
-        }
-        // surplus on a quiet sector is released for the attack
-        const here = mine.filter(a => a.p === f.p);
-        if (here.length && have > need * 1.6 + 2 && bold) {
-          const big = here.sort((a, b) => b.div - a.div)[0];
-          const keep = Math.max(0.3, need * 1.2 / sidePower(g, [big]));
-          if (keep < 0.8 && big.div > 1.5) { const split = addArmy(g, i, f.p, big.div * (1 - keep)); split.org = big.org; big.div *= keep; free.add(split); }
-        }
-      }
-      // 2. attack with free armies
-      const odds0 = bold ? 1.1 : 1.6;
-      for (const a of free) {
-        if (a.path.length) continue;
-        const myPower = sidePower(g, [a]);
-        let best = null, bs = -Infinity;
-        for (const [p, path] of reachable(data, g, a)) {
-          if (!path.length || (!isEnemyLand(p) && !enemyAt(p).length)) continue;
-          const ep = sidePower(g, enemyAt(p)) * 1.25;
-          const friends = mine.filter(f => f !== a && f.path.length && f.path[f.path.length - 1] === p);
-          const odds = (myPower + sidePower(g, friends)) / (ep + 0.01);
-          if (ep > 0 && odds < odds0) continue;
-          const isCap = g.nations.some(nn => nn.cap === p);
-          const sc = (isCap ? 8 : 0) + data.provinces[p].a / 300 + Math.min(odds, 3) - path.length * 0.5 + (ep > 0 ? 1 : 2) - (path.sea ? 2 : 0);
-          if (sc > bs) { bs = sc; best = path; }
-        }
-        if (best) { a.path = best; continue; }
-        if (!bold && front.length) { // defenders move up to the front and wait
-          const f = front[0]; if (a.p !== f.p) a.path = pathTo(data, g, i, a.p, p => p === f.p, 18) || [];
-          continue;
-        }
-        const pth = pathTo(data, g, i, a.p, isEnemyLand, 45);
-        if (pth) { a.path = pth; continue; }
-        // no land route: ship troops from a port to the weakest enemy coast
-        if (n.great || n.tech >= 1) {
-          if (!isPort(data, g, i, a.p)) { a.path = pathTo(data, g, i, a.p, p => isPort(data, g, i, p), 20) || []; continue; }
-          let target = null, ts = -Infinity;
-          for (const p of seaTargets(data, g, i, a.p)) {
-            if (!isEnemyLand(p)) continue;
-            const sc = -sidePower(g, enemyAt(p)) * 2 + data.provinces[p].a / 200 - km(data, p, a.p) / 800;
-            if (sc > ts) { ts = sc; target = p; }
-          }
-          if (target != null) a.path = [target];
-        }
-      }
-    });
+  function enemyPowerMap(g, me) {
+    const m = new Map();
+    for (const e of g.armies) if (e.p >= 0 && !e.sea && atWar(g, me, e.n)) m.set(e.p, (m.get(e.p) || 0) + sidePower(g, [e]));
+    return m;
   }
-  function dist(data, a, b) {
-    if (a === b) return 0;
-    const seen = new Set([a]); let frontier = [a];
-    for (let d = 1; d <= 10; d++) {
-      const nxt = [];
-      for (const p of frontier) for (const x of neighbours(data, p)) { if (x === b) return d; if (!seen.has(x)) { seen.add(x); nxt.push(x); } }
-      frontier = nxt;
+  function aiRecruit(data, g, i) {
+    const n = g.nations[i];
+    const target = n.startDiv * (n.wars.length ? 1.6 : 1.0) * (0.6 + n.mil / 125);
+    const have = divisions(g, i);
+    if (have >= target) return;
+    const cost = PERIODS[g.period].recruitCost;
+    const can = Math.floor(Math.max(0, n.money - 10) / cost);
+    const add = Math.min(can, Math.ceil((target - have) / 2), 10);
+    if (add >= 1) recruit(data, g, i, add);
+  }
+  // Re-plan one AI nation: hold the front first, then attack with what is left.
+  function aiPlan(data, g, i) {
+    const n = g.nations[i];
+    const mine = g.armies.filter(a => a.n === i && !a.battle && !a.retreat && !a.sea);
+    if (!n.wars.length) {
+      for (const a of mine) if (!a.route.length && a.p >= 0) { const c = g.ctrl[a.p]; if (c !== i && !(c >= 0 && allied(g, i, c))) { if (!orderTo(data, g, a, n.cap)) placeAt(a, n.cap); } }
+      return;
     }
-    return 99;
+    // attack if this nation started the war, or clearly outguns everyone it is fighting
+    const enemyDiv = n.wars.reduce((t, w) => t + divisions(g, w) * g.nations[w].tech, 0);
+    const bold = n.wars.some(w => (g.starter || {})[key(i, w)] === i) || divisions(g, i) * n.tech > enemyDiv * 1.4;
+    const ep = enemyPowerMap(g, i);
+    const isEnemyLand = p => { const c = g.ctrl[p]; return c >= 0 && atWar(g, i, c); };
+    const front = [], frontSet = new Set(), targets = [];
+    for (let p = 0; p < g.ctrl.length; p++) {
+      if (isEnemyLand(p)) { targets.push(p); continue; }
+      if (g.ctrl[p] !== i) continue;
+      let threat = 0, touches = false;
+      for (const q of data.provinces[p].nb) { if (isEnemyLand(q)) touches = true; const e = ep.get(q); if (e) { threat += e; touches = true; } }
+      if (touches) { front.push({ p, threat: threat + (p === n.cap ? 2 : 0.5) }); frontSet.add(p); }
+    }
+    front.sort((a, b) => b.threat - a.threat);
+    const committed = a => a.route.length && a.goal >= 0 && (isEnemyLand(a.goal) || frontSet.has(a.goal));
+    const free = new Set(mine.filter(a => !committed(a)));
+    // 1. defence: enough strength on each threatened front province (defenders fight better)
+    for (const f of front) {
+      const here = mine.filter(a => (a.route.length && a.goal === f.p) || (!a.route.length && a.p === f.p));
+      let have = sidePower(g, here);
+      for (const a of here) free.delete(a);
+      const need = f.threat / 1.3 * (bold ? 0.5 : 1);
+      while (have < need && free.size) {
+        let best = null, bd = 1200;
+        for (const a of free) { const d = km(data, a.p, f.p); if (d < bd) { bd = d; best = a; } }
+        if (!best) break;
+        free.delete(best);
+        if (orderTo(data, g, best, f.p)) have += sidePower(g, [best]);
+      }
+    }
+    // 2. attack: pick a target and gather enough nearby armies to beat what defends it
+    const odds0 = bold ? 1.2 : 1.7;
+    const pool = [...free].filter(a => !a.route.length && a.p >= 0);
+    for (let round = 0; round < 12 && pool.length; round++) {
+      let best = null, bs = -Infinity;
+      for (const p of targets) {
+        const near = pool.map(a => [a, km(data, a.p, p)]).filter(x => x[1] < 900).sort((x, y) => x[1] - y[1]);
+        if (!near.length) continue;
+        const need = (ep.get(p) || 0) * 1.25 * odds0;
+        const group = []; let pw = 0, dsum = 0;
+        for (const [a, d] of near) { if (pw > need && group.length) break; group.push(a); pw += sidePower(g, [a]); dsum += d; }
+        if (pw <= need) continue;
+        const sc = (g.nations.some(x => x.alive && x.cap === p) ? 8 : 0) + provValue(data, p) + (need ? 1 : 2) - dsum / group.length / 150 - group.length * 0.3;
+        if (sc > bs) { bs = sc; best = { p, group }; }
+      }
+      if (!best) break;
+      for (const a of best.group) { pool.splice(pool.indexOf(a), 1); orderTo(data, g, a, best.p); }
+    }
+    for (const a of pool) {
+      if (!bold && front.length) { if (a.p !== front[0].p) orderTo(data, g, a, front[0].p); continue; }
+      const path = routeProv(data, g, i, a.p, isEnemyLand, 5000);
+      if (path) { orderTo(data, g, a, path[path.length - 1]); continue; }
+      // no land route: great powers ship troops to the weakest enemy coast
+      if (n.great || n.tech >= 1) {
+        let t = null, ts = -Infinity;
+        for (const p of targets) { if (!data.provinces[p].c) continue; const sc = -(ep.get(p) || 0) * 2 + data.provinces[p].a / 200 - km(data, p, a.p) / 800; if (sc > ts) { ts = sc; t = p; } }
+        if (t != null) orderTo(data, g, a, t);
+      }
+    }
   }
 
   // ------------------------------------------------------------------ generals
@@ -720,7 +819,7 @@
   function addGeneral(g, n) {
     g.generals = g.generals || [];
     const k = g.generals.filter(x => x.n === n).length;
-    const gen = { id: (g.nextGen = (g.nextGen || 1) + 1), n, name: generalName(g, n, k), color: GEN_COLORS[k % GEN_COLORS.length], armies: [], order: { kind: 'hold' } };
+    const gen = { id: (g.nextGen = (g.nextGen || 1) + 1), n, name: generalName(g, n, k), color: GEN_COLORS[k % GEN_COLORS.length], armies: [], order: { kind: 'auto' } };
     g.generals.push(gen);
     return gen;
   }
@@ -764,70 +863,77 @@
     for (let p = 0; p < g.ctrl.length; p++) if (g.ctrl[p] === me) mine.push(p);
     return mine.sort((a, b) => km(data, a, theirCap) - km(data, b, theirCap)).slice(0, 3);
   }
-  // Spread armies along front provinces, most threatened first.
+  // Spread armies along front provinces, most threatened first. Armies already on their spot stay put.
   function holdFront(data, g, me, armies, front) {
     if (!front.length || !armies.length) return;
-    const threat = p => { let t = 0.5; for (const q of data.provinces[p].nb) t += sidePower(g, g.armies.filter(e => e.p === q && atWar(g, me, e.n))); return t; };
+    const ep = enemyPowerMap(g, me);
+    const threat = p => { let t = 0.5; for (const q of data.provinces[p].nb) t += ep.get(q) || 0; return t; };
     const ranked = front.map(p => ({ p, t: threat(p) })).sort((a, b) => b.t - a.t);
     const slots = [];
     for (let k = 0; slots.length < armies.length; k++) slots.push(ranked[k % ranked.length].p);
     const free = new Set(armies);
     for (const p of slots) {
       let best = null, bd = Infinity;
-      for (const a of free) { const d = km(data, a.p, p); if (d < bd) { bd = d; best = a; } }
+      for (const a of free) { const d = (a.goal === p || (a.p === p && !a.route.length)) ? -1 : km(data, a.p, p); if (d < bd) { bd = d; best = a; } }
       if (!best) break;
       free.delete(best);
-      best.path = best.p === p ? [] : (pathTo(data, g, me, best.p, q => q === p, 60) || []);
+      if ((best.p === p && !best.route.length) || (best.goal === p && best.route.length)) continue;
+      orderTo(data, g, best, p);
     }
   }
   function attackWith(data, g, me, armies, isTarget, fallbackFront) {
-    const enemyAt = p => g.armies.filter(e => e.p === p && atWar(g, me, e.n));
+    const ep = enemyPowerMap(g, me), targets = [];
+    for (let p = 0; p < g.ctrl.length; p++) if (isTarget(p)) targets.push(p);
     const left = [];
     for (const a of armies) {
-      const myPower = sidePower(g, [a]);
+      if (a.route.length && a.goal >= 0 && isTarget(a.goal)) continue;      // already on its way
+      const my = sidePower(g, [a]);
       let best = null, bs = -Infinity;
-      for (const [p, path] of reachable(data, g, a)) {
-        if (!path.length || !isTarget(p)) continue;
-        const ep = sidePower(g, enemyAt(p)) * 1.25;
-        const friends = armies.filter(f => f !== a && f.path.length && f.path[f.path.length - 1] === p);
-        const odds = (myPower + sidePower(g, friends)) / (ep + 0.01);
-        if (ep > 0 && odds < 1.0) continue;
-        const isCap = g.nations.some(nn => nn.cap === p);
-        const sc = (isCap ? 6 : 0) + provValue(data, p) + Math.min(odds, 3) - path.length * 0.4 - (path.sea ? 3 : 0);
-        if (sc > bs) { bs = sc; best = path; }
+      for (const p of targets) {
+        const d = km(data, a.p, p); if (d > 800) continue;
+        const e = (ep.get(p) || 0) * 1.25, odds = my / (e + 0.01);
+        if (e > 0 && odds < 1.0) continue;
+        const sc = (g.nations.some(x => x.alive && x.cap === p) ? 6 : 0) + provValue(data, p) + Math.min(odds, 3) - d / 160;
+        if (sc > bs) { bs = sc; best = p; }
       }
-      if (best) a.path = best; else left.push(a);
+      if (best == null || !orderTo(data, g, a, best)) left.push(a);
     }
     // the rest push toward the target
-    for (const a of left) a.path = pathTo(data, g, me, a.p, isTarget, 60) || [];
-    const stuck = left.filter(a => !a.path.length);
+    const stuck = [];
+    for (const a of left) { const path = routeProv(data, g, me, a.p, isTarget, 6000); if (!path || !orderTo(data, g, a, path[path.length - 1])) stuck.push(a); }
     if (stuck.length && fallbackFront) holdFront(data, g, me, stuck, fallbackFront);
   }
-  // Give the player's generals' armies their paths for this turn. Returns notes for the UI.
+  // Let the player's generals carry out their standing orders.
   function runGenerals(data, g) {
-    const notes = [];
     for (const gen of g.generals || []) {
       if (gen.n !== g.player) continue;
       gen.armies = gen.armies.filter(id => g.armies.some(a => a.id === id));
-      const armies = g.armies.filter(a => gen.armies.includes(a.id) && !a.manual);
+      const armies = g.armies.filter(a => gen.armies.includes(a.id) && !a.manual && !a.battle && !a.retreat && !a.sea);
+      gen.note = '';
       if (!armies.length) continue;
-      const o = gen.order || { kind: 'hold' }, me = g.player;
-      for (const a of armies) a.path = [];
-      if (o.kind === 'front' && o.target != null) holdFront(data, g, me, armies, frontWith(data, g, me, o.target));
+      const o = gen.order || { kind: 'auto' }, me = g.player;
+      if (o.kind === 'auto') {
+        // guard every border with a nation we are at war with (the general's own armies spread over it)
+        const wars = g.nations[me].wars.filter(w => g.nations[w].alive);
+        if (wars.length) {
+          const fr = new Set(); for (const w of wars) for (const p of frontWith(data, g, me, w)) fr.add(p);
+          const mid = armies.reduce((t, a) => [t[0] + a.x / armies.length, t[1] + a.y / armies.length], [0, 0]);
+          const near = [...fr].filter(p => kmLL(mid[0], mid[1], data.provinces[p].x, data.provinces[p].y) < 1500);
+          holdFront(data, g, me, armies, near.length ? near : [...fr]);
+        }
+      } else if (o.kind === 'front' && o.target != null) holdFront(data, g, me, armies, frontWith(data, g, me, o.target));
       else if (o.kind === 'attack' && o.target != null) {
-        if (!atWar(g, me, o.target)) { holdFront(data, g, me, armies, frontWith(data, g, me, o.target)); notes.push(`${gen.name}: not at war with ${g.nations[o.target].name}, holding the border instead.`); }
+        if (!atWar(g, me, o.target)) { holdFront(data, g, me, armies, frontWith(data, g, me, o.target)); gen.note = `Not at war with ${g.nations[o.target].name}, holding the border instead.`; }
         else attackWith(data, g, me, armies, p => g.ctrl[p] === o.target || (g.ctrl[p] >= 0 && allied(g, g.ctrl[p], o.target) && atWar(g, me, g.ctrl[p])), frontWith(data, g, me, o.target));
       } else if (o.kind === 'seize' && o.prov != null) {
         const c = g.ctrl[o.prov];
-        if (c === me) { holdFront(data, g, me, armies, [o.prov].concat(data.provinces[o.prov].nb.filter(q => g.ctrl[q] === me))); }
-        else if (c >= 0 && !atWar(g, me, c)) notes.push(`${gen.name}: not at war with ${g.nations[c].name}, cannot take ${data.provinces[o.prov].n}.`);
+        if (c === me) holdFront(data, g, me, armies, [o.prov].concat(data.provinces[o.prov].nb.filter(q => g.ctrl[q] === me)));
+        else if (c >= 0 && !atWar(g, me, c)) gen.note = `Not at war with ${g.nations[c].name}, cannot take ${data.provinces[o.prov].n}.`;
         else attackWith(data, g, me, armies, p => p === o.prov || (data.provinces[o.prov].nb.includes(p) && g.ctrl[p] >= 0 && atWar(g, me, g.ctrl[p])));
       } else if (o.kind === 'defend' && o.prov != null) {
         holdFront(data, g, me, armies, [o.prov].concat(data.provinces[o.prov].nb.filter(q => g.ctrl[q] === me)).slice(0, Math.max(1, armies.length)));
       }
     }
-    for (const a of g.armies) a.manual = false;
-    return notes;
   }
 
   // ------------------------------------------------------------------ the historical timeline
@@ -873,38 +979,48 @@
     return out;
   }
 
-  // ------------------------------------------------------------------ turn
-  // Phase 1: move everything and find battles. The UI resolves battles, then calls endTurnFinish.
-  function endTurnMove(data, g) {
-    for (const a of g.armies) a.moved = false;
-    g.generalNotes = runGenerals(data, g);
-    aiMilitary(data, g);
-    moveArmies(data, g, a => a.n === g.player);
-    moveArmies(data, g, a => a.n !== g.player);
-    return findBattles(g);
+  // ------------------------------------------------------------------ the clock
+  // Time runs continuously. step() advances the world by dt days; the UI calls it every frame.
+  function dateOf(g) { return new Date(Date.UTC(g.start[0], g.start[1] - 1, 1) + Math.floor(g.day) * 86400000); }
+  function step(data, g, dt) {
+    DATA = data;
+    const d0 = Math.floor(g.day);
+    g.day += dt;
+    for (const a of g.armies) moveArmy(data, g, a, dt);
+    const byProv = new Map();
+    for (const a of g.armies) if (a.p >= 0 && !a.sea) { let l = byProv.get(a.p); if (!l) byProv.set(a.p, l = []); l.push(a); }
+    for (const a of g.armies) capture(g, a, byProv);
+    engage(g);
+    updateBattles(data, g, dt);
+    for (let d = d0 + 1; d <= Math.floor(g.day); d++) newDay(data, g, d);
   }
-  function endTurnFinish(data, g) {
-    const occ = occupy(data, g);
-    const caps = capitulations(data, g);
-    mergeArmies(g);
-    // economy and recovery
+  function newDay(data, g, d) {
+    // morale recovers, faster at home
+    for (const a of g.armies) if (!a.battle) a.org = Math.min(100, a.org + (friendlyGround(g, a) ? 4 : 1.5));
+    // AI nations and the player's generals re-plan every other day (staggered so not everyone thinks at once)
+    g.nations.forEach((n, i) => { if (i !== g.player && n.alive && (d + i) % 2 === 0) aiPlan(data, g, i); });
+    if (d % 2 === 0) runGenerals(data, g);
+    if (d % 5 === 0) capitulations(data, g);
+    const date = dateOf(g), m = date.getUTCMonth() + 1, y = date.getUTCFullYear();
+    if (m !== g.month || y !== g.year) newMonth(data, g, y, m);
+  }
+  function newMonth(data, g, y, m) {
+    const ended = dateLabel(g);
     g.nations.forEach((n, i) => {
       if (!n.alive) return;
       n.money += income(data, g, i) - upkeep(g, i);
       if (n.money < 0) { n.stab = Math.max(5, n.stab - 3); n.money = 0; }
       if (n.wars.length) n.stab = Math.max(5, n.stab - 0.5); else n.stab = Math.min(90, n.stab + 0.5);
+      if (i !== g.player) aiRecruit(data, g, i);
     });
-    for (const a of g.armies) {
-      const home = g.ctrl[a.p] === a.n || allied(g, a.n, g.ctrl[a.p]);
-      a.org = Math.min(100, a.org + (home ? 20 : 8));
-    }
-    // calendar
-    g.month++; if (g.month > 12) { g.month = 1; g.year++; }
-    g.turn++;
-    return { occ, caps };
+    mergeArmies(g);
+    g.year = y; g.month = m; g.turn++;
+    events.push({ type: 'month', label: ended });
   }
-
   function dateLabel(g) { return `${MONTHS[g.month - 1]} ${g.year}`; }
+  function dayLabel(g) { const d = dateOf(g); return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`; }
+  // days until the next month starts
+  function daysToMonth(g) { const d = dateOf(g); return Math.max(1, Math.round((Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - d.getTime()) / 86400000)); }
 
   // ------------------------------------------------------------------ applying AI changes
   function findNation(g, name) {
@@ -959,10 +1075,10 @@
   function deserialize(s) { return JSON.parse(s); }
 
   root.World = {
-    PERIODS, MONTHS, newGame, dateLabel, rel, setRel, addRel, atWar, allied, ally, unally, declareWar, makePeace, setWar,
-    transfer, provincesOf, income, upkeep, divisions, recruit, reachable, canEnter, moveArmies, findBattles, battleOdds, autoResolve,
-    finishBattle, endTurnMove, endTurnFinish, applyChange, findNation, findProvince, neighbours, borderProvinces, sidePower,
-    serialize, deserialize, hashColor, seaTargets, isPort, km, provValue,
-    addGeneral, generalOf, assignArmy, initGenerals, runGenerals, frontWith, upcoming, applyTimeline, TIMELINE, checkAlive, mergeArmies, addArmy, pathTo, dist
+    PERIODS, MONTHS, STEP, newGame, attach, step, dateLabel, dayLabel, daysToMonth, rel, setRel, addRel, atWar, allied, ally, unally, declareWar, makePeace, setWar,
+    transfer, provincesOf, income, upkeep, divisions, recruit, canEnter, orderTo, stop, routeProv, battleOdds, liveBattle, finishBattle, sidePower,
+    applyChange, findNation, findProvince, neighbours, borderProvinces, serialize, deserialize, hashColor, isPort, km, kmLL, provValue, locate,
+    addGeneral, generalOf, assignArmy, initGenerals, runGenerals, frontWith, upcoming, applyTimeline, TIMELINE, checkAlive, mergeArmies, addArmy,
+    drainChanged, drainEvents
   };
 })(typeof window !== 'undefined' ? window : globalThis);

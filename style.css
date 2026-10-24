@@ -134,8 +134,25 @@ textarea.orders:focus { outline: none; border-color: var(--blue); }
 #sel-card { left: 10px; top: 10px; width: 300px; max-height: calc(100% - 96px); overflow-y: auto; }
 .army-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 12px; }
 .army-row button { margin-left: auto; }
-#btn-end { position: absolute; right: 10px; bottom: 10px; width: 350px; height: 56px; z-index: 5; flex-direction: column; gap: 0; font-size: 21px; padding-bottom: max(6px, env(safe-area-inset-bottom)); }
-#btn-end small { font-family: var(--mono); font-size: 11px; text-transform: none; letter-spacing: 0; opacity: .8; }
+#clock { position: absolute; right: 10px; bottom: 10px; width: 350px; height: 56px; z-index: 5; display: flex; align-items: stretch; gap: 4px; background: var(--panel); border: 1px solid var(--line2); border-radius: 10px; padding: 5px; padding-bottom: max(5px, env(safe-area-inset-bottom)); }
+#clock button { flex: 0 0 46px; background: rgba(255,255,255,.04); border: 1px solid var(--line); color: var(--text); border-radius: 7px; font-size: 13px; letter-spacing: -2px; cursor: pointer; }
+#clock button.on { background: var(--blue); border-color: var(--blue); color: #04111a; font-weight: 700; }
+#clock.paused button[data-speed="0"] { background: var(--gold); border-color: var(--gold); color: #1b1300; animation: pulse 1.6s ease-in-out infinite; }
+#clock .clock-date { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: flex-end; padding-right: 6px; min-width: 0; }
+#clock .clock-date b { font-family: var(--head); font-size: 19px; letter-spacing: .02em; white-space: nowrap; }
+#clock .clock-date small { font-size: 11px; color: var(--gold); white-space: nowrap; }
+@keyframes pulse { 50% { opacity: .65; } }
+#battles { position: absolute; left: 10px; bottom: 10px; width: 250px; z-index: 5; display: flex; flex-direction: column; gap: 6px; }
+#battles[hidden] { display: none; }
+#battles .bt { background: var(--panel); border: 1px solid var(--line2); border-left: 3px solid var(--red); border-radius: 8px; padding: 7px 9px; }
+#battles .bt-top { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; }
+#battles .bt-top b { font-family: var(--head); font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#battles .bt-top span { font-size: 11px; color: var(--dim); white-space: nowrap; }
+#battles .acts { display: flex; gap: 6px; margin-top: 4px; }
+#battles .dim { font-size: 11px; color: var(--dim); }
+.toast.news { pointer-events: auto; cursor: pointer; border-left-color: var(--gold); text-align: left; color: var(--text); display: flex; flex-direction: column; gap: 2px; font: inherit; font-size: 12.5px; }
+.toast.news b { font-family: var(--serif, Georgia, serif); font-size: 15px; }
+.toast.news span { color: var(--dim); font-size: 11.5px; }
 #toasts, .toasts { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; z-index: 8; width: min(92vw, 480px); }
 .toast { background: var(--panel); border: 1px solid var(--line2); border-left: 3px solid var(--dim); padding: 7px 12px; border-radius: 6px; font-size: 12.5px; animation: toast-in .25s ease-out; max-width: 100%; }
 .toast.good { border-left-color: var(--blue); }
@@ -234,7 +251,12 @@ textarea.orders:focus { outline: none; border-color: var(--blue); }
   .nation-chip { flex: 1 1 140px; }
   #side { left: 0; right: 0; top: auto; bottom: 64px; width: auto; height: 46%; border-radius: 12px 12px 0 0; }
   #side.collapsed { height: auto; }
-  #btn-end { left: 8px; right: 8px; width: auto; bottom: 6px; height: 52px; }
+  #clock { left: 8px; right: 8px; width: auto; bottom: 6px; height: 52px; }
+  #clock button { flex: 1 1 0; }
+  #clock .clock-date { flex: 0 0 auto; }
+  #clock .clock-date b { font-size: 15px; }
+  #battles { left: 8px; width: 200px; bottom: calc(46% + 72px); }
+  #side.collapsed ~ #battles { bottom: 112px; }
   #sel-card { left: 8px; right: 8px; width: auto; top: 8px; max-height: 40%; }
   #pick-card { left: 8px; right: 8px; width: auto; top: auto; bottom: 56px; }
   #pick-search { width: 40vw; }

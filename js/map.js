@@ -1,10 +1,14 @@
-/* World map: vector provinces over a shaded-relief background, HOI4-style zoom. */
+/* World map: vector provinces over a shaded-relief background, HOI4-style zoom.
+   The map is drawn as cached 256px tiles per zoom level (like a web map), so panning and
+   zooming only draw the few tiles that are new; a captured province only redraws its own tiles. */
 (function (root) {
   'use strict';
   const NS = root.NatoSymbols;
   const WU = 10;                                  // world units per degree of longitude
   const R2D = 180 / Math.PI;
   const miller = lat => 1.25 * Math.log(Math.tan(Math.PI / 4 + 0.4 * lat / R2D)) * R2D;
+  const HAS_CANVAS = typeof Path2D !== 'undefined';
+  const TS = 256, S0 = 0.125, MAXL = 10;          // tile size in device px; level 0 scale (device px per world unit)
 
   let reliefImg = null;
   function relief() {
@@ -28,41 +32,86 @@
     });
     const users = arcs.map(() => []);
     const provs = data.provinces.map((p, i) => {
-      const path = new Path2D();
+      const path = HAS_CANVAS ? new Path2D() : null, rings = [];
       let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
       for (const poly of p.g || []) for (const ring of poly) {
-        let first = true;
+        const pts = [];
         for (const ref of ring) {
           const a = arcs[ref >= 0 ? ref : ~ref], n = a.length / 2;
           users[ref >= 0 ? ref : ~ref].push(i);
           for (let k = 0; k < n; k++) {
-            const j = ref >= 0 ? k : n - 1 - k, x = a[j * 2], y = a[j * 2 + 1];
-            if (first) { path.moveTo(x, y); first = false; } else path.lineTo(x, y);
-            if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
+            const j = ref >= 0 ? k : n - 1 - k;
+            pts.push(a[j * 2], a[j * 2 + 1]);
           }
         }
-        path.closePath();
+        const r = new Float32Array(pts);
+        rings.push(r);
+        for (let k = 0; k < r.length; k += 2) {
+          const x = r[k], y = r[k + 1];
+          if (path) { if (k) path.lineTo(x, y); else path.moveTo(x, y); }
+          if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
+        }
+        if (path) path.closePath();
       }
-      return { path, box: [minx, miny, maxx, maxy], lx: X(p.x), ly: Y(p.y) };
+      return { path, rings, box: [minx, miny, maxx, maxy], lx: X(p.x), ly: Y(p.y) };
     });
-    // spatial index of province boxes for hit-testing
-    const CELL = 60, grid = new Map();
-    provs.forEach((p, i) => {
-      const [a, b, c, d] = p.box;
-      for (let gx = Math.floor(a / CELL); gx <= Math.floor(c / CELL); gx++) for (let gy = Math.floor(b / CELL); gy <= Math.floor(d / CELL); gy++) {
-        const k = gx + ',' + gy; if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i);
+    const CELL = 60;
+    const index = boxes => {
+      const grid = new Map();
+      boxes.forEach((b, i) => {
+        for (let gx = Math.floor(b[0] / CELL); gx <= Math.floor(b[2] / CELL); gx++) for (let gy = Math.floor(b[1] / CELL); gy <= Math.floor(b[3] / CELL); gy++) {
+          const k = gx * 4096 + gy; let l = grid.get(k); if (!l) grid.set(k, l = []); l.push(i);
+        }
+      });
+      return grid;
+    };
+    const arcBox = arcs.map(a => {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let i = 0; i < a.length; i += 2) { if (a[i] < x0) x0 = a[i]; if (a[i] > x1) x1 = a[i]; if (a[i + 1] < y0) y0 = a[i + 1]; if (a[i + 1] > y1) y1 = a[i + 1]; }
+      return [x0, y0, x1, y1];
+    });
+    const grid = index(provs.map(p => p.box)), arcGrid = index(arcBox);
+    // ids whose boxes touch a world rectangle
+    const query = (g, boxes, x0, y0, x1, y1) => {
+      const out = new Set();
+      for (let gx = Math.floor(x0 / CELL); gx <= Math.floor(x1 / CELL); gx++) for (let gy = Math.floor(y0 / CELL); gy <= Math.floor(y1 / CELL); gy++) {
+        const l = g.get(gx * 4096 + gy); if (!l) continue;
+        for (const i of l) { const b = boxes[i]; if (b[0] <= x1 && b[2] >= x0 && b[1] <= y1 && b[3] >= y0) out.add(i); }
       }
-    });
-    const land = new Path2D(); provs.forEach(p => land.addPath(p.path));
-    data._geo = { arcs, users: users.map(u => [...new Set(u)]), provs, grid, CELL, land, W: 360 * WU, H: (top - miller(data.latMin)) * WU, X, Y };
-    return data._geo;
+      return out;
+    };
+    const inRings = (rings, x, y) => {
+      let inside = false;
+      for (const r of rings) for (let i = 0, j = r.length - 2; i < r.length; j = i, i += 2) {
+        const yi = r[i + 1], yj = r[j + 1];
+        if ((yi > y) !== (yj > y) && x < (r[j] - r[i]) * (y - yi) / (yj - yi) + r[i]) inside = !inside;
+      }
+      return inside;
+    };
+    const provBoxes = provs.map(p => p.box);
+    const geo = {
+      arcs, users: users.map(u => [...new Set(u)]), provs, grid, arcGrid, arcBox, CELL, W: 360 * WU, H: (top - miller(data.latMin)) * WU, X, Y,
+      lon: x => x / WU - 180,
+      lat: y => { const m = top - y / WU; return (Math.atan(Math.exp(m / 1.25 / R2D)) - Math.PI / 4) / 0.4 * R2D; },
+      provsIn: (x0, y0, x1, y1) => query(grid, provBoxes, x0, y0, x1, y1),
+      arcsIn: (x0, y0, x1, y1) => query(arcGrid, arcBox, x0, y0, x1, y1),
+      // province under a world point, or -1 for sea
+      at(x, y, hint) {
+        if (hint != null && hint >= 0) { const b = provs[hint].box; if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3] && inRings(provs[hint].rings, x, y)) return hint; }
+        const l = grid.get(Math.floor(x / CELL) * 4096 + Math.floor(y / CELL));
+        if (l) for (const i of l) { const b = provs[i].box; if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3] && inRings(provs[i].rings, x, y)) return i; }
+        return -1;
+      },
+      locate(lon, lat, hint) { return geo.at(X(lon), Y(lat), hint); }
+    };
+    data._geo = geo;
+    return geo;
   }
   function arcPath(geo, list) {
     const p = new Path2D();
     for (const k of list) { const a = geo.arcs[k]; p.moveTo(a[0], a[1]); for (let i = 2; i < a.length; i += 2) p.lineTo(a[i], a[i + 1]); }
     return p;
   }
-  function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
 
   class WorldMap {
     constructor(canvas, data, opts) {
@@ -71,38 +120,26 @@
       this.geo = prepare(data);
       this.W = this.geo.W; this.H = this.geo.H;
       this.cam = { x: 0, y: 0, z: 1 };
-      this.cache = document.createElement('canvas');
-      this.cacheCam = null; this.version = 0; this.cacheVersion = -1;
+      this.tiles = new Map(); this.pool = [];
+      this.version = 0; this.labelsDirty = true; this.labelsAt = 0;
       this.hit = document.createElement('canvas').getContext('2d');
-      const img = relief(); if (!img.complete) img.addEventListener('load', () => { this.version++; }, { once: true });
+      this.textW = new Map();
+      const img = relief(); if (!img.complete) img.addEventListener('load', () => this.paint(), { once: true });
       this.bindInput();
     }
 
-    // ---------------------------------------------------------------- layers that depend on ownership
-    paint() {
-      const g = this.opts.state(), geo = this.geo;
-      // fills: one path per owner, occupied provinces striped with the occupier's colour
-      const byOwner = new Map(), occ = new Map();
-      g.owner.forEach((o, i) => {
-        if (o < 0) return;
-        if (!byOwner.has(o)) byOwner.set(o, new Path2D());
-        byOwner.get(o).addPath(geo.provs[i].path);
-        const c = g.ctrl[i];
-        if (c >= 0 && c !== o) { if (!occ.has(c)) occ.set(c, new Path2D()); occ.get(c).addPath(geo.provs[i].path); }
-      });
-      this.fills = byOwner; this.occ = occ;
-      // borders by kind
-      const nation = [], prov = [], coast = [], front = [];
-      geo.users.forEach((u, k) => {
-        if (u.length < 2) { coast.push(k); return; }
-        const a = u[0], b = u[1];
-        if (g.owner[a] !== g.owner[b]) nation.push(k); else prov.push(k);
-        const ca = g.ctrl[a], cb = g.ctrl[b];
-        if (ca >= 0 && cb >= 0 && ca !== cb && World.atWar(g, ca, cb)) front.push(k);
-      });
-      this.borders = { nation: arcPath(geo, nation), prov: arcPath(geo, prov), coast: arcPath(geo, coast), front: arcPath(geo, front) };
-      this.labels = this.computeLabels();
-      this.version++;
+    // ---------------------------------------------------------------- invalidation
+    // Everything changed (a war, a peace, a new game): redraw all tiles, keeping the old ones on screen meanwhile.
+    paint() { for (const t of this.tiles.values()) t.dirty = true; this.labelsDirty = true; this.version++; }
+    // Only these provinces changed hands.
+    invalidate(list) {
+      if (!list.length) return;
+      const pad = 2, boxes = list.map(p => this.geo.provs[p].box);
+      for (const t of this.tiles.values()) {
+        if (t.dirty) continue;
+        for (const b of boxes) if (b[0] - pad <= t.x1 && b[2] + pad >= t.x0 && b[1] - pad <= t.y1 && b[3] + pad >= t.y0) { t.dirty = true; break; }
+      }
+      this.labelsDirty = true; this.version++;
     }
     computeLabels() {
       const g = this.opts.state(), data = this.data, geo = this.geo, out = [];
@@ -142,8 +179,7 @@
       const r = this.cv.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
       this.sw = r.width; this.sh = r.height; this.dpr = dpr;
       this.cv.width = Math.round(r.width * dpr); this.cv.height = Math.round(r.height * dpr);
-      this.cache.width = this.cv.width; this.cache.height = this.cv.height;
-      this.cacheCam = null; this.clamp();
+      this.clamp();
     }
     fitZ() { return Math.min(this.sw / this.W, this.sh / this.H); }
     clamp() {
@@ -153,93 +189,166 @@
       c.x = vw >= this.W ? (this.W - vw) / 2 : Math.max(0, Math.min(this.W - vw, c.x));
       c.y = vh >= this.H ? (this.H - vh) / 2 : Math.max(0, Math.min(this.H - vh, c.y));
     }
-    focus(p, z) {
-      const pr = this.geo.provs[p];
+    focus(p, z) { const pr = this.geo.provs[p]; this.focusAt(pr.lx, pr.ly, z); }
+    focusAt(x, y, z) {
       this.cam.z = z || Math.max(this.cam.z, 3);
-      this.cam.x = pr.lx - this.sw / this.cam.z / 2; this.cam.y = pr.ly - this.sh / this.cam.z / 2;
+      this.cam.x = x - this.sw / this.cam.z / 2; this.cam.y = y - this.sh / this.cam.z / 2;
       this.clamp();
     }
     toW(sx, sy) { return { x: sx / this.cam.z + this.cam.x, y: sy / this.cam.z + this.cam.y }; }
     toS(x, y) { return [(x - this.cam.x) * this.cam.z, (y - this.cam.y) * this.cam.z]; }
-    provAt(sx, sy) {
-      const w = this.toW(sx, sy), geo = this.geo;
-      const cand = geo.grid.get(Math.floor(w.x / geo.CELL) + ',' + Math.floor(w.y / geo.CELL)) || [];
-      for (const i of cand) {
-        const b = geo.provs[i].box;
-        if (w.x < b[0] || w.x > b[2] || w.y < b[1] || w.y > b[3]) continue;
-        if (this.hit.isPointInPath(geo.provs[i].path, w.x, w.y)) return i;
-      }
-      return -1;
-    }
+    // screen position of a lon/lat point
+    llS(lon, lat) { return this.toS(this.geo.X(lon), this.geo.Y(lat)); }
+    lonLatAt(sx, sy) { const w = this.toW(sx, sy); return [this.geo.lon(w.x), this.geo.lat(w.y)]; }
+    provAt(sx, sy) { const w = this.toW(sx, sy); return this.geo.at(w.x, w.y); }
     zoomAt(sx, sy, f) {
       const w = this.toW(sx, sy); this.cam.z *= f; this.clamp();
       this.cam.x = w.x - sx / this.cam.z; this.cam.y = w.y - sy / this.cam.z; this.clamp();
     }
     unitSize() { return Math.min(34, this.cam.z * 7); }
 
-    // ---------------------------------------------------------------- static layer (re-rendered when the view settles)
-    renderCache() {
-      const c = this.cache.getContext('2d'), { cam, geo } = this, g = this.opts.state(), z = cam.z;
-      c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      c.fillStyle = '#1a2c3d'; c.fillRect(0, 0, this.sw, this.sh);
-      c.save();
-      c.translate(-cam.x * z, -cam.y * z); c.scale(z, z);
+    // ---------------------------------------------------------------- tiles
+    renderTile(t) {
+      const { geo } = this, g = this.opts.state(), L = t.L, sc = S0 * 2 ** L, tw = TS / sc;
+      const c = t.cv.getContext('2d');
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.fillStyle = '#1a2c3d'; c.fillRect(0, 0, TS, TS);
+      c.setTransform(sc, 0, 0, sc, -t.x0 * sc, -t.y0 * sc);
       const img = relief();
-      if (img.complete && img.naturalWidth) { c.imageSmoothingEnabled = true; c.drawImage(img, 0, 0, this.W, this.H); }
-      // deepen the sea so land stands out
-      const sea = new Path2D(); sea.rect(-10, -10, this.W + 20, this.H + 20); sea.addPath(geo.land);
-      c.fillStyle = 'rgba(12,28,46,0.5)'; c.fill(sea, 'evenodd');
-      // nation colours over the terrain
-      c.globalAlpha = 0.58;
-      for (const [o, path] of this.fills || []) { c.fillStyle = g.nations[o].color; c.fill(path); }
-      c.globalAlpha = 0.85;
-      for (const [o, path] of this.occ || []) { c.fillStyle = stripes(c, g.nations[o].color, z); c.fill(path); }
-      c.globalAlpha = 1;
-      if (this.borders) {
-        c.lineJoin = 'round'; c.lineCap = 'round';
-        if (z > 0.9) { c.strokeStyle = `rgba(20,16,10,${Math.min(0.45, (z - 0.9) * 0.4)})`; c.lineWidth = 0.8 / z; c.stroke(this.borders.prov); }
-        c.strokeStyle = 'rgba(15,25,35,0.75)'; c.lineWidth = 1 / z; c.stroke(this.borders.coast);
-        c.strokeStyle = 'rgba(18,12,8,0.9)'; c.lineWidth = Math.max(1.4, Math.min(3.2, z * 0.9)) / z; c.stroke(this.borders.nation);
-        c.strokeStyle = 'rgba(255,240,220,0.22)'; c.lineWidth = 0.6 / z; c.stroke(this.borders.nation);
-        if (this.opts.showFront !== false) {
-          c.strokeStyle = 'rgba(0,0,0,.7)'; c.lineWidth = 4.5 / z; c.stroke(this.borders.front);
-          c.strokeStyle = '#ff5145'; c.lineWidth = 2.6 / z; c.stroke(this.borders.front);
-        }
+      if (img.complete && img.naturalWidth) {
+        const kx = img.naturalWidth / this.W, ky = img.naturalHeight / this.H;
+        const x0 = Math.max(0, t.x0), y0 = Math.max(0, t.y0), x1 = Math.min(this.W, t.x1), y1 = Math.min(this.H, t.y1);
+        if (x1 > x0 && y1 > y0) { c.imageSmoothingEnabled = true; c.drawImage(img, x0 * kx, y0 * ky, (x1 - x0) * kx, (y1 - y0) * ky, x0, y0, x1 - x0, y1 - y0); }
       }
-      c.restore();
-      this.drawLabels(c);
-      this.cacheCam = { ...cam }; this.cacheVersion = this.version;
+      const pad = 1 / sc;
+      const ids = geo.provsIn(t.x0 - pad, t.y0 - pad, t.x1 + pad, t.y1 + pad);
+      // deepen the sea so land stands out
+      const sea = new Path2D(); sea.rect(t.x0 - pad, t.y0 - pad, tw + 2 * pad, tw + 2 * pad);
+      for (const i of ids) sea.addPath(geo.provs[i].path);
+      c.fillStyle = 'rgba(12,28,46,0.5)'; c.fill(sea, 'evenodd');
+      // nation colours over the terrain; occupied land striped in the occupier's colour
+      const byOwner = new Map(), occ = new Map();
+      for (const i of ids) {
+        const o = g.owner[i]; if (o < 0) continue;
+        let p = byOwner.get(o); if (!p) byOwner.set(o, p = new Path2D()); p.addPath(geo.provs[i].path);
+        const ct = g.ctrl[i];
+        if (ct >= 0 && ct !== o) { let q = occ.get(ct); if (!q) occ.set(ct, q = new Path2D()); q.addPath(geo.provs[i].path); }
+      }
+      c.globalAlpha = 0.58;
+      for (const [o, p] of byOwner) { c.fillStyle = g.nations[o].color; c.fill(p); }
+      c.globalAlpha = 0.85;
+      for (const [o, p] of occ) { c.fillStyle = stripes(c, g.nations[o].color, sc / this.dpr); c.fill(p); }
+      c.globalAlpha = 1;
+      // borders by kind
+      const nation = [], prov = [], coast = [], front = [];
+      for (const k of geo.arcsIn(t.x0 - pad, t.y0 - pad, t.x1 + pad, t.y1 + pad)) {
+        const u = geo.users[k];
+        if (u.length < 2) { coast.push(k); continue; }
+        const a = u[0], b = u[1];
+        if (g.owner[a] !== g.owner[b]) nation.push(k); else prov.push(k);
+        const ca = g.ctrl[a], cb = g.ctrl[b];
+        if (ca >= 0 && cb >= 0 && ca !== cb && root.World.atWar(g, ca, cb)) front.push(k);
+      }
+      // widths in screen px; tiles are shown at 50-100% of their native size, so draw lines a bit heavier
+      const z = sc / this.dpr, px = w => w * 1.3 / z;
+      c.lineJoin = 'round'; c.lineCap = 'round';
+      if (z > 0.9 && prov.length) { c.strokeStyle = `rgba(20,16,10,${Math.min(0.45, (z - 0.9) * 0.4)})`; c.lineWidth = px(0.8); c.stroke(arcPath(geo, prov)); }
+      if (coast.length) { c.strokeStyle = 'rgba(15,25,35,0.75)'; c.lineWidth = px(1); c.stroke(arcPath(geo, coast)); }
+      if (nation.length) {
+        const p = arcPath(geo, nation);
+        c.strokeStyle = 'rgba(18,12,8,0.9)'; c.lineWidth = px(Math.max(1.4, Math.min(3.2, z * 0.9))); c.stroke(p);
+        c.strokeStyle = 'rgba(255,240,220,0.22)'; c.lineWidth = px(0.6); c.stroke(p);
+      }
+      if (front.length && this.opts.showFront !== false) {
+        const p = arcPath(geo, front);
+        c.strokeStyle = 'rgba(0,0,0,.7)'; c.lineWidth = px(4.5); c.stroke(p);
+        c.strokeStyle = '#ff5145'; c.lineWidth = px(2.6); c.stroke(p);
+      }
+      t.dirty = false; t.ready = true;
     }
-    drawLabels(c) {
+    tile(L, tx, ty, create) {
+      const k = L * 1e8 + tx * 1e4 + ty;
+      let t = this.tiles.get(k);
+      if (t) { this.tiles.delete(k); this.tiles.set(k, t); return t; }      // keep recently used tiles last
+      if (!create) return null;
+      const tw = TS / (S0 * 2 ** L);
+      let cv = this.pool.pop();
+      if (!cv) { cv = document.createElement('canvas'); cv.width = cv.height = TS; }
+      t = { L, tx, ty, cv, x0: tx * tw, y0: ty * tw, x1: (tx + 1) * tw, y1: (ty + 1) * tw, dirty: true, ready: false };
+      this.tiles.set(k, t);
+      while (this.tiles.size > 180) { const [ok, old] = this.tiles.entries().next().value; this.tiles.delete(ok); this.pool.push(old.cv); }
+      return t;
+    }
+    // Nearest drawn tile above this one, for a blurry stand-in while it renders.
+    ancestor(L, tx, ty) {
+      for (let l = L - 1; l >= 0; l--) {
+        const f = 2 ** (L - l), t = this.tile(l, Math.floor(tx / f), Math.floor(ty / f), false);
+        if (t && t.ready) return { t, f, sx: (tx - Math.floor(tx / f) * f) * TS / f, sy: (ty - Math.floor(ty / f) * f) * TS / f };
+      }
+      return null;
+    }
+    drawTiles(ctx, now) {
+      const { cam, dpr } = this, sc = cam.z * dpr;
+      const L = Math.max(0, Math.min(MAXL, Math.ceil(Math.log2(sc / S0) - 0.05)));
+      const tw = TS / (S0 * 2 ** L);
+      const nx = Math.ceil(this.W / tw), ny = Math.ceil(this.H / tw);
+      const tx0 = Math.max(0, Math.floor(cam.x / tw)), ty0 = Math.max(0, Math.floor(cam.y / tw));
+      const tx1 = Math.min(nx - 1, Math.floor((cam.x + this.sw / cam.z) / tw)), ty1 = Math.min(ny - 1, Math.floor((cam.y + this.sh / cam.z) / tw));
+      // the whole-world level always exists as the last-resort stand-in
+      const need = [];
+      for (let x = 0; x < Math.ceil(this.W / TS * S0); x++) for (let y = 0; y < Math.ceil(this.H / TS * S0); y++) { const t = this.tile(0, x, y, true); if (!t.ready || t.dirty) need.push(t); }
+      const vis = [];
+      for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) { const t = this.tile(L, tx, ty, true); vis.push(t); if (!t.ready || t.dirty) need.push(t); }
+      // render missing tiles first (nearest the centre), then stale ones, within a time budget
+      const cx = cam.x + this.sw / cam.z / 2, cy = cam.y + this.sh / cam.z / 2;
+      need.sort((a, b) => (a.ready - b.ready) || (a.L - b.L) * 0 || (((a.x0 + a.x1) / 2 - cx) ** 2 + ((a.y0 + a.y1) / 2 - cy) ** 2) - (((b.x0 + b.x1) / 2 - cx) ** 2 + ((b.y0 + b.y1) / 2 - cy) ** 2));
+      // while the view is moving, show stand-ins (a blurry parent tile) and only draw what has nothing to show at all
+      const moving = this.interacting && now - this.lastInput < 180, t0 = performance.now();
+      for (const t of need) {
+        const blank = !t.ready && (t.L === 0 || !this.ancestor(t.L, t.tx, t.ty));
+        if (!blank && (moving || performance.now() - t0 > 10)) continue;
+        this.renderTile(t);
+      }
+      ctx.imageSmoothingEnabled = true;
+      for (const t of vis) {
+        const dx = Math.floor((t.x0 - cam.x) * sc), dy = Math.floor((t.y0 - cam.y) * sc);
+        const ex = Math.ceil((t.x1 - cam.x) * sc), ey = Math.ceil((t.y1 - cam.y) * sc);
+        if (t.ready) ctx.drawImage(t.cv, dx, dy, ex - dx, ey - dy);
+        else { const a = this.ancestor(t.L, t.tx, t.ty); if (a) ctx.drawImage(a.t.cv, a.sx, a.sy, TS / a.f, TS / a.f, dx, dy, ex - dx, ey - dy); }
+      }
+    }
+
+    // ---------------------------------------------------------------- labels (drawn every frame, on top of the tiles)
+    textWidth(c, s) { let w = this.textW.get(s); if (w == null) { c.font = '500 10px "Source Serif 4", Georgia, serif'; w = c.measureText(s).width / 10; this.textW.set(s, w); } return w; }
+    drawLabels(c, now) {
       const g = this.opts.state(), { cam, geo, data } = this, z = cam.z;
+      if (this.labelsDirty && now - this.labelsAt > 1200) { this.labels = this.computeLabels(); this.labelsDirty = false; this.labelsAt = now; }
       c.textAlign = 'center'; c.textBaseline = 'middle';
+      const x0 = cam.x, y0 = cam.y, x1 = cam.x + this.sw / z, y1 = cam.y + this.sh / z;
       // province names when zoomed in
       if (z > 3.2) {
         const fs = Math.min(15, 6 + z * 0.9);
         c.font = `500 ${fs}px "Source Serif 4", Georgia, serif`;
-        data.provinces.forEach((p, i) => {
-          const pr = geo.provs[i], [x, y] = this.toS(pr.lx, pr.ly);
-          if (x < -60 || y < -20 || x > this.sw + 60 || y > this.sh + 20) return;
-          const w = (pr.box[2] - pr.box[0]) * z;
-          if (w < c.measureText(p.n).width * 0.9) return;
-          c.lineWidth = 2.5; c.strokeStyle = 'rgba(255,250,240,0.55)'; c.strokeText(p.n, x, y + fs * 0.9);
-          c.fillStyle = 'rgba(30,24,16,0.85)'; c.fillText(p.n, x, y + fs * 0.9);
-        });
+        c.lineWidth = 2.5; c.strokeStyle = 'rgba(255,250,240,0.55)'; c.fillStyle = 'rgba(30,24,16,0.85)';
+        for (const i of geo.provsIn(x0, y0, x1, y1)) {
+          const pr = geo.provs[i], name = data.provinces[i].n;
+          if ((pr.box[2] - pr.box[0]) * z < this.textWidth(c, name) * fs * 0.9) continue;
+          const [x, y] = this.toS(pr.lx, pr.ly);
+          c.strokeText(name, x, y + fs * 0.9); c.fillText(name, x, y + fs * 0.9);
+        }
       }
       // capitals
       for (const n of g.nations) {
-        if (!n.alive) continue;
+        if (!n.alive || (z < 0.8 && !n.great)) continue;
         const pr = geo.provs[n.cap], [x, y] = this.toS(pr.lx, pr.ly);
         if (x < -10 || y < -10 || x > this.sw + 10 || y > this.sh + 10) continue;
-        if (z < 0.8 && !n.great) continue;
         star(c, x, y, Math.min(8, 3 + z * 0.8), Math.min(3.4, 1.3 + z * 0.35), '#fff7e0', 'rgba(20,10,0,.8)');
       }
       // nation names, along the country's main axis
       for (const L of this.labels || []) {
         const n = g.nations[L.n]; if (!n.alive) continue;
         const name = n.name.toUpperCase();
-        const px = L.len * z;
-        let fs = px / (name.length * 0.72 + 1);
+        let fs = L.len * z / (name.length * 0.72 + 1);
         fs = Math.min(fs, 16 + Math.sqrt(L.area) * z * 0.05, 64);
         if (fs < 8.5) continue;
         const [x, y] = this.toS(L.x, L.y);
@@ -256,20 +365,13 @@
 
     // ---------------------------------------------------------------- frame
     draw(now) {
-      const { ctx, cam, geo } = this, g = this.opts.state(), z = cam.z;
+      const { ctx, cam, geo } = this, z = cam.z;
       if (!this.sw) return;
-      const cc = this.cacheCam, moving = this.interacting && now - this.lastInput < 160;
-      const stale = !cc || this.cacheVersion !== this.version || cc.x !== cam.x || cc.y !== cam.y || cc.z !== cam.z;
-      if (stale && (!moving || !cc)) this.renderCache();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = '#1a2c3d'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
-      if (this.cacheCam) {
-        // while panning/zooming, stretch the last render; it is redrawn sharp once the view settles
-        const k = cam.z / this.cacheCam.z, dx = (this.cacheCam.x - cam.x) * cam.z, dy = (this.cacheCam.y - cam.y) * cam.z;
-        ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-        ctx.drawImage(this.cache, dx, dy, this.sw * k, this.sh * k);
-      }
+      this.drawTiles(ctx, now);
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      this.drawLabels(ctx, now);
       const t = now / 1000;
       // highlights
       const hl = this.opts.highlights();
@@ -292,51 +394,53 @@
         if (f.arrow) this.arrow(ctx, f.arrow[0], f.arrow[1], f.color);
       }
       // army routes
-      const armies = this.opts.armies(), data = this.data;
+      const armies = this.opts.armies();
       for (const a of armies) {
-        if (!a.path || !a.path.length || !a.showPath) continue;
+        if (!a.route || !a.route.length || !a.showPath) continue;
         ctx.strokeStyle = a.pathColor || 'rgba(255,255,255,.9)'; ctx.lineWidth = 2.2; ctx.setLineDash([6, 4]);
         ctx.beginPath();
-        let [x0, y0] = this.toS(geo.provs[a.p].lx, geo.provs[a.p].ly); ctx.moveTo(x0, y0);
-        for (const q of a.path) { const [x, y] = this.toS(geo.provs[q].lx, geo.provs[q].ly); ctx.lineTo(x, y); }
+        let [x0, y0] = this.llS(a.x, a.y); ctx.moveTo(x0, y0);
+        let lx = x0, ly = y0, px = x0, py = y0;
+        for (const q of a.route) { const [x, y] = this.llS(q[0], q[1]); ctx.lineTo(x, y); px = lx; py = ly; lx = x; ly = y; }
         ctx.stroke(); ctx.setLineDash([]);
-        const last = a.path.length > 1 ? a.path[a.path.length - 2] : a.p, end = a.path[a.path.length - 1];
-        this.arrowHead(ctx, this.toS(geo.provs[last].lx, geo.provs[last].ly), this.toS(geo.provs[end].lx, geo.provs[end].ly), a.pathColor || '#fff');
+        this.arrowHead(ctx, [px, py], [lx, ly], a.pathColor || '#fff');
       }
-      // armies: they grow as you zoom in
-      const s = this.unitSize(), mini = s < 9;
-      const byProv = new Map();
-      for (const a of armies) { if (!byProv.has(a.p)) byProv.set(a.p, []); byProv.get(a.p).push(a); }
+      // armies: they grow as you zoom in; ones sharing a spot are fanned out side by side
+      const s = this.unitSize(), mini = s < 9, sp = mini ? 7 : s * 1.75;
+      const spots = new Map();
       this.armyHits = [];
-      for (const [p, list] of byProv) {
-        const pr = geo.provs[p];
-        list.forEach((a, k) => {
-          let [x, y] = this.toS(pr.lx, pr.ly);
-          const sp = mini ? 7 : s * 1.75;
-          x += (k - (list.length - 1) / 2) * sp;
-          if (x < -50 || y < -50 || x > this.sw + 50 || y > this.sh + 50) return;
-          if (!a.always && (mini || z < 4)) return;          // neutral armies only when zoomed in
-          if (mini) {
-            ctx.fillStyle = a.affil === 'friend' ? NS.FRIEND : a.affil === 'hostile' ? NS.HOSTILE : NS.NEUTRAL;
-            ctx.strokeStyle = a.selected ? '#fff' : '#0b0f14'; ctx.lineWidth = a.selected ? 2 : 1;
-            ctx.fillRect(x - 3.5, y - 2.5, 7, 5); ctx.strokeRect(x - 3.5, y - 2.5, 7, 5);
-            this.armyHits.push({ a, x, y, r: 9 });
-            return;
-          }
-          if (a.genColor) { ctx.fillStyle = a.genColor; ctx.fillRect(x - s * 0.75, y + s * 0.5, s * 1.5, Math.max(2, s * 0.12)); }
-          NS.drawUnit(ctx, x, y, s, a.type, { affil: a.affil, ech: a.ech, selected: a.selected });
-          ctx.font = `700 ${Math.round(s * 0.55)}px "IBM Plex Mono", monospace`;
-          const label = a.div >= 10 ? Math.round(a.div) + '' : a.div.toFixed(1).replace(/\.0$/, '');
-          const tw = ctx.measureText(label).width + 6, by = y + s * (a.affil === 'hostile' ? 0.86 : 0.62) + 2;
-          ctx.fillStyle = 'rgba(0,0,0,.78)'; ctx.fillRect(x - tw / 2, by, tw, s * 0.62);
-          ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(label, x, by + 1); ctx.textBaseline = 'middle';
-          this.armyHits.push({ a, x, y, r: s });
-        });
+      for (const a of armies) {
+        if (!a.always && (mini || z < 4)) continue;          // neutral armies only when zoomed in
+        let [x, y] = this.llS(a.x, a.y);
+        if (x < -50 || y < -50 || x > this.sw + 50 || y > this.sh + 50) continue;
+        const k = Math.round(x / sp) + ':' + Math.round(y / (mini ? 6 : s));
+        const n = spots.get(k) || 0; spots.set(k, n + 1);
+        x += (n % 2 ? 1 : -1) * Math.ceil(n / 2) * sp;
+        if (mini) {
+          ctx.fillStyle = a.affil === 'friend' ? NS.FRIEND : a.affil === 'hostile' ? NS.HOSTILE : NS.NEUTRAL;
+          ctx.strokeStyle = a.selected ? '#fff' : '#0b0f14'; ctx.lineWidth = a.selected ? 2 : 1;
+          ctx.fillRect(x - 3.5, y - 2.5, 7, 5); ctx.strokeRect(x - 3.5, y - 2.5, 7, 5);
+          this.armyHits.push({ a, x, y, r: 9 });
+          continue;
+        }
+        ctx.globalAlpha = a.sea ? 0.75 : 1;
+        if (a.genColor) { ctx.fillStyle = a.genColor; ctx.fillRect(x - s * 0.75, y + s * 0.5, s * 1.5, Math.max(2, s * 0.12)); }
+        NS.drawUnit(ctx, x, y, s, a.type, { affil: a.affil, ech: a.ech, selected: a.selected });
+        ctx.font = `700 ${Math.round(s * 0.55)}px "IBM Plex Mono", monospace`;
+        const label = (a.sea ? '⚓ ' : '') + (a.div >= 10 ? Math.round(a.div) + '' : a.div.toFixed(1).replace(/\.0$/, ''));
+        const tw = ctx.measureText(label).width + 6, by = y + s * (a.affil === 'hostile' ? 0.86 : 0.62) + 2;
+        ctx.fillStyle = 'rgba(0,0,0,.78)'; ctx.fillRect(x - tw / 2, by, tw, s * 0.62);
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(label, x, by + 1); ctx.textBaseline = 'middle';
+        if (a.org != null && a.org < 99) { ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(x - s * 0.75, y - s * 0.62 - 5, s * 1.5, 3.5); ctx.fillStyle = a.org > 50 ? '#7fe08a' : a.org > 25 ? '#ffcf5a' : '#ff6a5f'; ctx.fillRect(x - s * 0.75, y - s * 0.62 - 5, s * 1.5 * a.org / 100, 3.5); }
+        ctx.globalAlpha = 1;
+        this.armyHits.push({ a, x, y, r: s });
       }
-      // battle markers
+      // battles: crossed swords that pulse
       for (const b of this.opts.battles ? this.opts.battles() : []) {
-        const pr = geo.provs[b.p], [x, y] = this.toS(pr.lx, pr.ly), r = 8 + 2 * Math.sin(t * 6), off = Math.max(14, s);
-        ctx.strokeStyle = '#ffcf5a'; ctx.lineWidth = 3;
+        const [x, y] = this.llS(b.x, b.y), r = 7 + 2 * Math.sin(t * 6), off = Math.max(12, s * 0.9);
+        ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(x - r, y - r - off); ctx.lineTo(x + r, y + r - off); ctx.moveTo(x + r, y - r - off); ctx.lineTo(x - r, y + r - off); ctx.stroke();
+        ctx.strokeStyle = b.mine ? '#ffcf5a' : '#ff8a66'; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.moveTo(x - r, y - r - off); ctx.lineTo(x + r, y + r - off); ctx.moveTo(x + r, y - r - off); ctx.lineTo(x - r, y + r - off); ctx.stroke();
       }
     }
@@ -403,7 +507,7 @@
         if (!drag) return;
         const d = drag; if (d.pinch) { if (!ptrs.size) drag = null; return; }
         drag = null;
-        if (!d.moved && e.type === 'pointerup') this.opts.onClick(this.provAt(p.x, p.y), { right: d.button === 2, shift: e.shiftKey, army: this.armyAt(p.x, p.y) });
+        if (!d.moved && e.type === 'pointerup') this.opts.onClick(this.provAt(p.x, p.y), { right: d.button === 2, shift: e.shiftKey, army: this.armyAt(p.x, p.y), ll: this.lonLatAt(p.x, p.y) });
       };
       cv.addEventListener('pointerup', up);
       cv.addEventListener('pointercancel', up);
@@ -439,19 +543,15 @@
     const s = Math.max(cv.width / geo.W, cv.height / geo.H);
     c.fillStyle = '#16283a'; c.fillRect(0, 0, cv.width, cv.height);
     c.save(); c.translate((cv.width - geo.W * s) / 2, (cv.height - geo.H * s) / 2 - 8); c.scale(s, s);
-    const draw = () => {
-      const img = relief(); if (img.complete && img.naturalWidth) c.drawImage(img, 0, 0, geo.W, geo.H);
-      c.globalAlpha = 0.62;
-      state.owner.forEach((o, i) => { if (o >= 0) { c.fillStyle = state.nations[o].color; c.fill(geo.provs[i].path); } });
-      c.globalAlpha = 1;
-    };
-    draw();
+    const img = relief(); if (img.complete && img.naturalWidth) c.drawImage(img, 0, 0, geo.W, geo.H);
+    c.globalAlpha = 0.62;
+    state.owner.forEach((o, i) => { if (o >= 0) { c.fillStyle = state.nations[o].color; c.fill(geo.provs[i].path); } });
+    c.globalAlpha = 1;
     c.restore();
-    const img = relief();
     if (!img.complete) img.addEventListener('load', () => renderPreview(cv, data, state), { once: true });
   }
 
   root.WorldMap = WorldMap;
   root.WorldMap.renderPreview = renderPreview;
   root.WorldMap.prepare = prepare;
-})(window);
+})(typeof window !== 'undefined' ? window : globalThis);

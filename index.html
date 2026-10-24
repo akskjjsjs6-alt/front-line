@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 
@@ -74,7 +74,14 @@
       <div class="tab-body" id="tab-diplo" hidden></div>
       <div class="tab-body" id="tab-news" hidden></div>
     </aside>
-    <button id="btn-end" class="btn primary"><span>End turn</span><small id="end-date"></small></button>
+    <aside id="battles" hidden></aside>
+    <div id="clock" class="paused" role="group" aria-label="Game speed">
+      <button data-speed="0" title="Pause (Space)">❚❚</button>
+      <button data-speed="1" title="Normal (1)">▶</button>
+      <button data-speed="2" title="Fast (2)">▶▶</button>
+      <button data-speed="3" title="Fastest (3)">▶▶▶</button>
+      <div class="clock-date"><b id="clock-date"></b><small id="news-status" hidden>📰 writing the news…</small></div>
+    </div>
   </div>
 </section>
 
@@ -109,13 +116,13 @@
 
 <div id="overlay" hidden><div class="sheet" id="sheet"></div></div>
 
-<script src="js/symbols.js?v=4"></script>
-<script src="js/world.js?v=4"></script>
-<script src="js/gm.js?v=4"></script>
-<script src="js/map.js?v=4"></script>
-<script src="battle/engine.js?v=4"></script>
-<script src="battle/ai.js?v=4"></script>
-<script src="battle/battle.js?v=4"></script>
-<script src="js/app.js?v=4"></script>
+<script src="js/symbols.js?v=5"></script>
+<script src="js/world.js?v=5"></script>
+<script src="js/gm.js?v=5"></script>
+<script src="js/map.js?v=5"></script>
+<script src="battle/engine.js?v=5"></script>
+<script src="battle/ai.js?v=5"></script>
+<script src="battle/battle.js?v=5"></script>
+<script src="js/app.js?v=5"></script>
 </body>
 </html>

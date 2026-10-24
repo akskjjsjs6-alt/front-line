@@ -3,7 +3,8 @@
 //   OPENROUTER_API_KEY  an OpenRouter key (sk-or-...), or
 //   AI_GATEWAY_API_KEY  a Vercel AI Gateway key, or
 //   ANTHROPIC_API_KEY   a Claude API key.
-// Optional: AI_MODEL to use a different model.
+// With OpenRouter, every free model is tried in turn (fastest first) until one answers quickly.
+// Optional: AI_MODEL to put one model first.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import Anthropic from "npm:@anthropic-ai/sdk";
 
@@ -14,11 +15,8 @@ const VIA: "openrouter" | "vercel" | "anthropic" =
   : "anthropic";
 const VIA_VERCEL = VIA === "vercel";
 const MODEL = Deno.env.get("AI_MODEL") || Deno.env.get("CLAUDE_MODEL") ||
-  { openrouter: "dots-studio/dots-3-note-preview:free", vercel: "anthropic/claude-opus-5.5", anthropic: "claude-opus-5-5" }[VIA];
+  { openrouter: "free models (auto)", vercel: "anthropic/claude-opus-5.5", anthropic: "claude-opus-5-5" }[VIA];
 const client = new Anthropic({ apiKey: KEY, ...(VIA_VERCEL ? { baseURL: "https://ai-gateway.vercel.sh" } : {}) });
-
-// When the main free model fails or is busy, try this one (slower, but steady).
-const BACKUP = Deno.env.get("AI_BACKUP_MODEL") || (VIA === "openrouter" && !Deno.env.get("AI_MODEL") ? "recursive/flint-v1.0:free" : "");
 
 class AIError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -26,11 +24,11 @@ class AIError extends Error {
 
 // OpenRouter speaks the OpenAI chat completions format.
 // deno-lint-ignore no-explicit-any
-async function openrouter(body: Record<string, unknown>, ms = 140_000): Promise<any> {
+async function openrouter(body: Record<string, unknown>, ms = 140_000, stop?: AbortSignal): Promise<any> {
   const t0 = Date.now();
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
-    signal: AbortSignal.timeout(ms),
+    signal: stop ? AbortSignal.any([AbortSignal.timeout(ms), stop]) : AbortSignal.timeout(ms),
     headers: {
       "Authorization": `Bearer ${KEY}`,
       "Content-Type": "application/json",
@@ -170,56 +168,104 @@ function parseJson(text: string) {
   throw new Error("The AI's answer was not valid JSON.");
 }
 
-// Free OpenRouter models can be picked per request (for trying them out); paid ones only through AI_MODEL.
-type Pick = { model?: string; think?: boolean; effort?: string; ms?: number };
-
-// Thinking is off for the fast default model; models that must think get the requested effort.
-const THINKS = (m: string) => !m.startsWith("dots-studio/");
-
-async function askOpenRouter(system: string, user: string, schema: object, effort: string, pick: Pick) {
-  const think = pick.think ?? THINKS(pick.model!);
-  const base = {
-    max_tokens: 16000,
-    model: pick.model,
-    reasoning: think ? { effort: pick.effort || effort, exclude: true } : { enabled: false },
-  };
-  const text = (d: { choices?: { message?: { content?: string } }[] }) => {
-    const t = d.choices?.[0]?.message?.content || "";
-    if (!t) throw new Error("The AI sent an empty answer.");
-    return t;
-  };
+// ---------------------------------------------------------------- free model cascade
+// All free OpenRouter models, tried fastest-first. A model that is slow gets company: after a few seconds
+// the next one starts too, and the first good answer wins. Models that fail sit out for a while.
+type Pick = { model?: string };
+type FreeModel = { id: string; schema: boolean; json: boolean; mustThink: boolean };
+const PREFER = [
+  "dots-studio/dots-3-note-preview:free", "google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free",
+  "nvidia/nemotron-3-super-120b-a12b:free", "xingchen-agi/xing4.0-29b-a4b:free", "nvidia/nemotron-3.5-super-vl:free",
+];
+let catalog: { at: number; list: FreeModel[] } | null = null;
+const stats = new Map<string, { ms: number; until: number }>();
+async function freeModels(): Promise<FreeModel[]> {
+  if (catalog && Date.now() - catalog.at < 3_600_000) return catalog.list;
   try {
-    return parseJson(text(await openrouter({
-      ...base,
-      messages: [{ role: "system", content: system }, { role: "user", content: user }],
-      response_format: { type: "json_schema", json_schema: { name: "answer", strict: true, schema } },
-    }, pick.ms)));
-  } catch (e) {
-    if (e instanceof AIError && (e.status === 401 || e.status === 402 || e.status === 429)) throw e;
-    if (e instanceof Error && e.name === "TimeoutError") throw e;
-    // some models ignore or reject structured output: ask for JSON in the prompt instead
-    return parseJson(text(await openrouter({
-      ...base,
-      messages: [
-        { role: "system", content: system + "\n\nReply with only one JSON object, no other text, that matches this JSON schema:\n" + JSON.stringify(schema) },
-        { role: "user", content: user },
-      ],
-    }, pick.ms)));
-  }
+    const r = await fetch("https://openrouter.ai/api/v1/models", { signal: AbortSignal.timeout(5000) });
+    // deno-lint-ignore no-explicit-any
+    const d: any = await r.json();
+    // deno-lint-ignore no-explicit-any
+    const list = (d.data || []).filter((m: any) => String(m.id).endsWith(":free") && (m.context_length || 0) >= 32000 &&
+      // deno-lint-ignore no-explicit-any
+      (m.architecture?.output_modalities || ["text"]).join() === "text").map((m: any) => {
+      const sp: string[] = m.supported_parameters || [];
+      return { id: m.id, schema: sp.includes("structured_outputs"), json: sp.includes("response_format"), mustThink: !!m.reasoning?.mandatory };
+    });
+    if (list.length) catalog = { at: Date.now(), list };
+  } catch (e) { console.log("model list failed", String(e)); }
+  return catalog?.list || PREFER.map(id => ({ id, schema: true, json: true, mustThink: false }));
+}
+function ranked(list: FreeModel[]): FreeModel[] {
+  const now = Date.now();
+  const score = (m: FreeModel) => {
+    const s = stats.get(m.id), pref = PREFER.indexOf(m.id);
+    let v = pref < 0 ? 20 : pref;
+    if (m.mustThink) v += 30;                       // models that must "think" first are slow
+    if (s && s.until > now) v += 100;               // failed recently: last resort
+    else if (s && s.ms) v = Math.min(v, s.ms / 1000 - 5);   // answered recently: by speed
+    return v;
+  };
+  return list.slice().sort((a, b) => score(a) - score(b));
+}
+async function askModel(m: FreeModel, system: string, user: string, schema: { required?: string[] }, ms: number, stop: AbortSignal) {
+  const inPrompt = "\n\nReply with only one JSON object, no other text, that matches this JSON schema:\n" + JSON.stringify(schema);
+  const body: Record<string, unknown> = {
+    model: m.id, max_tokens: 8000,
+    reasoning: m.mustThink ? { effort: "low", exclude: true } : { enabled: false },
+    messages: [{ role: "system", content: system + (m.schema ? "" : inPrompt) }, { role: "user", content: user }],
+  };
+  if (m.schema) body.response_format = { type: "json_schema", json_schema: { name: "answer", strict: true, schema } };
+  else if (m.json) body.response_format = { type: "json_object" };
+  const d = await openrouter(body, ms, stop);
+  const text = d.choices?.[0]?.message?.content || "";
+  if (!text) throw new Error("empty answer");
+  const out = parseJson(text);
+  for (const k of schema.required || []) if (!(k in out)) throw new Error(`answer is missing "${k}"`);
+  return out;
+}
+async function cascade(system: string, user: string, schema: object, kind: "turn" | "chat", pick: Pick) {
+  let list = ranked(await freeModels());
+  const first = pick.model || Deno.env.get("AI_MODEL");
+  if (first) list = [{ id: first, schema: true, json: true, mustThink: false }, ...list.filter(m => m.id !== first)];
+  const hedge = kind === "chat" ? 4000 : 8000, perTry = kind === "chat" ? 25_000 : 50_000, deadline = Date.now() + 135_000;
+  return await new Promise((resolve, reject) => {
+    let i = 0, running = 0, done = false, lastErr: unknown = null;
+    const ctrls: AbortController[] = [];
+    const finish = (fn: () => void) => { if (done) return; done = true; for (const c of ctrls) c.abort(); fn(); };
+    const next = () => {
+      if (done) return;
+      if (i >= list.length || Date.now() > deadline - 3000) {
+        if (!running) finish(() => reject(lastErr || new Error("No free AI model answered.")));
+        return;
+      }
+      const m = list[i++], ctl = new AbortController(), t0 = Date.now();
+      ctrls.push(ctl); running++;
+      const hedgeTimer = setTimeout(() => { if (running < 4) next(); }, hedge);
+      askModel(m, system, user, schema as { required?: string[] }, Math.min(perTry, deadline - Date.now()), ctl.signal).then(out => {
+        running--; clearTimeout(hedgeTimer);
+        stats.set(m.id, { ms: Date.now() - t0, until: 0 });
+        console.log(`answered by ${m.id} in ${Date.now() - t0}ms`);
+        finish(() => resolve({ ...out, _model: m.id }));
+      }).catch(e => {
+        running--; clearTimeout(hedgeTimer);
+        if (done) return;
+        const busy = e instanceof AIError && e.status === 429;
+        stats.set(m.id, { ms: 0, until: Date.now() + (busy ? 120_000 : 600_000) });
+        lastErr = e;
+        console.log(`skip ${m.id}: ${String(e).slice(0, 160)}`);
+        if (e instanceof AIError && (e.status === 401 || e.status === 402)) return finish(() => reject(e));
+        next();
+      });
+    };
+    next();
+  });
 }
 
 async function ask(system: string, user: string, schema: object, effort: "low" | "medium", pick: Pick = {}) {
   const sys = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
   const msgs = [{ role: "user", content: user }];
-  if (VIA === "openrouter") {
-    const model = pick.model || MODEL;
-    try {
-      return await askOpenRouter(system, user, schema, effort, { ...pick, model, ms: BACKUP && BACKUP !== model ? 40_000 : 140_000 });
-    } catch (e) {
-      if (!BACKUP || BACKUP === model || (e instanceof AIError && (e.status === 401 || e.status === 402))) throw e;
-      return await askOpenRouter(system, user, schema, effort, { model: BACKUP, ms: 100_000 });
-    }
-  }
+  if (VIA === "openrouter") return await cascade(system, user, schema, effort === "low" ? "chat" : "turn", pick);
   if (VIA === "anthropic") {
     const res = await client.beta.messages.create({
       model: MODEL, max_tokens: 16000,
@@ -263,11 +309,7 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Bad JSON" }, 400);
   }
   const ready = KEY !== "";
-  const pick: Pick = {
-    model: typeof body.model === "string" && body.model.endsWith(":free") ? body.model : undefined,
-    think: typeof body.think === "boolean" ? body.think : undefined,
-    effort: ["minimal", "low", "medium", "high"].includes(body.effort as string) ? body.effort as string : undefined,
-  };
+  const pick: Pick = { model: typeof body.model === "string" && body.model.endsWith(":free") ? body.model : undefined };
   if (body.mode === "ping") {
     if (!ready) return json({ ok: false, reason: "missing key", model: MODEL });
     try {
