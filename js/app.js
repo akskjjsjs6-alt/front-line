@@ -41,7 +41,7 @@
     $('pick-search').oninput = pickSearch;
     pingAI();
     const badge = document.getElementById('ai-badge');
-    if (badge) { badge.onclick = uiMyAI; badge.title = 'Choose whose AI runs the world (free server, your key, or paste mode)'; }
+    if (badge) badge.title = 'Whether the AI game master is reachable';
     addEventListener('resize', () => { if (map && !$('game').hidden) map.resize(); if (pickMap && !$('pick').hidden) pickMap.resize(); if (!$('start').hidden) drawStartBg(); });
     addEventListener('keydown', onKey);
     requestAnimationFrame(frame);
@@ -59,22 +59,19 @@
   let pingTimer = 0;
   async function pingAI() {
     clearTimeout(pingTimer);
-    // the user's own AI doesn't need the managed server; the badge shows the mode instead
-    if (GM.myAI().mode !== 'server') { updateBadge(); return; }
     try {
       const res = await fetch(GM.AI_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'ping' }) });
       const out = await res.json().catch(() => ({}));
       aiState = res.ok && out.ok ? 'on' : 'off';
     } catch (e) { aiState = 'off'; }
     $('ai-status').textContent = aiState === 'on' ? 'AI game master: online. Other nations are played by an AI.'
-      : 'AI game master: offline right now. You can still play; nations follow simple built-in rules until it is back — or tap the AI badge in-game to bring your own AI.';
+      : 'AI game master: offline right now. You can still play; nations follow simple built-in rules until it is back.';
     updateBadge();
     // keep checking while offline so the badge (and the real AI) come back on their own
     if (aiState !== 'on') pingTimer = setTimeout(pingAI, 20000);
   }
   function updateBadge() {
     const b = $('ai-badge'); if (!b) return;
-    if (GM.myAI().mode === 'manual') { b.className = 'ai-badge on'; b.textContent = '● My AI (paste mode)'; return; }
     b.className = 'ai-badge ' + (aiState === 'on' ? 'on' : aiState === 'off' ? 'off' : '');
     b.textContent = aiState === 'on' ? '● AI online' : aiState === 'off' ? '● AI offline' : '● AI…';
   }
@@ -592,35 +589,6 @@
       hist.push({ role: 'player', text }); pending = null; draw();
       log.insertAdjacentHTML('beforeend', `<div class="typing">${esc(n.leader || n.name)} is writing…</div>`); log.scrollTop = log.scrollHeight;
       let r = await GM.chat(data, g, i, text);
-      if (r.manual) {
-        // the relay extension tries first (fully automatic); without it, the paste sheet opens.
-        // The chat sheet is closed while waiting either way, so rebuild it with the outcome.
-        const typing = log.querySelector('.typing'); if (typing) typing.remove();
-        let parsed = null, note = '', prior = '', sheetOnly = false;
-        for (let k = 0; k < 8 && !parsed; k++) {
-          let text = null;
-          if (!sheetOnly) {
-            const relay = await relayAsk(r.manual, 210000);
-            if (relay) {
-              if (relay.text) { text = relay.text; sheetOnly = true; }   // bad answer? fix it by hand next round
-              else note = relay.error || 'The AI relay could not answer.';
-            }
-          }
-          if (!text) { text = await askMyAI(n.name, r.manual, note, prior); sheetOnly = false; }
-          if (!text) break;
-          prior = text;
-          try { parsed = GM.chatFromText(text); }
-          catch (e) { note = String(e.message || e); }
-        }
-        let online = !!parsed, res = parsed || GM.offlineChat(g, i, text);
-        hist.push({ role: 'leader', text: res.reply || 'No reply was given.' });
-        W.addRel(g, i, g.player, Math.max(-20, Math.min(20, Number(res.relation_change) || 0)));
-        if (!online) { aiState = 'off'; if (r.error) console.warn(r.error); } else { aiState = 'on'; }
-        updateBadge(); saveGame();
-        const deal = online && parsed.agreement && parsed.agreement.kind !== 'none' ? parsed.agreement : null;
-        openChat(i, null, deal);
-        return;
-      }
       const { res, online, error } = r;
       if (!online) { aiState = 'off'; updateBadge(); pingTimer = setTimeout(pingAI, 20000); if (error) console.warn(error); } else { aiState = 'on'; updateBadge(); }
       hist.push({ role: 'leader', text: res.reply });
@@ -704,27 +672,7 @@
     g.orders = ''; diploLog = []; if (!$('tab-orders').hidden) renderOrders();
     $('news-status').hidden = false;
     try {
-      let { online, res, error, manual } = await GM.runTurn(data, g, { orders, diplomacy: diplo, battles: facts });
-      if (manual) {
-        // the relay extension tries first (fully automatic); without it, the paste sheet opens
-        let note = '', prior = '', sheetOnly = false;
-        for (let i = 0; i < 8; i++) {
-          let text = null;
-          if (!sheetOnly) {
-            const relay = await relayAsk(manual, 210000);
-            if (relay) {
-              if (relay.text) { text = relay.text; sheetOnly = true; }   // bad answer? fix it by hand next round
-              else note = relay.error || 'The AI relay could not answer.';
-            }
-          }
-          if (!text) { text = await askMyAI('the month', manual, note, prior); sheetOnly = false; }
-          if (!text) break;
-          prior = text;
-          try { res = GM.turnFromText(text); online = true; break; }
-          catch (e) { note = String(e.message || e); }
-        }
-        if (!res) { online = false; error = 'AI prompt skipped'; res = GM.offlineTurn(data, g, { orders, diplomacy: diplo, battles: facts }); }
-      }
+      const { online, res, error } = await GM.runTurn(data, g, { orders, diplomacy: diplo, battles: facts });
       aiState = online ? 'on' : 'off'; updateBadge();
       if (!online) { console.warn('AI offline:', error); pingTimer = setTimeout(pingAI, 20000); }
       GM.applyTurn(data, g, res);
@@ -858,90 +806,6 @@
   function sheet(html, cls) { const s = $('sheet'); s.className = 'sheet' + (cls ? ' ' + cls : ''); s.innerHTML = html; $('overlay').hidden = false; }
   function closeSheet() { $('overlay').hidden = true; }
 
-  // ================================================================ your own AI
-  // Paste-bridge: the game writes the game master's prompt; the player runs it through any
-  // AI they already have open (Gemini/ChatGPT/Claude tab) and pastes the reply back here.
-  // With the "Front Line AI relay" extension installed, the same route is automatic: the
-  // prompt is typed into the user's Gemini tab and the answer comes back — no keys, no API.
-  let relayN = 0;
-  function relayPing() {                       // is the relay content script listening?
-    return new Promise(resolve => {
-      const id = 'ping' + ++relayN;
-      const on = ev => {
-        if (ev.source !== window) return;
-        const m = ev.data;
-        if (m && m.source === 'frontline-ai-ext' && m.id === id && m.pong) { cleanup(); resolve(true); }
-      };
-      const cleanup = () => { clearTimeout(t); window.removeEventListener('message', on); };
-      window.addEventListener('message', on);
-      const t = setTimeout(() => { cleanup(); resolve(false); }, 450);
-      window.postMessage({ source: 'frontline-ai', id, type: 'ping' }, '*');
-    });
-  }
-  async function relayAsk(prompt, ms) {
-    // resolves {text} | {error} — or null when no extension is installed (caller falls back to the sheet)
-    if (!await relayPing()) return null;
-    return new Promise(resolve => {
-      const id = 'ask' + ++relayN;
-      const on = ev => {
-        if (ev.source !== window) return;
-        const m = ev.data;
-        if (m && m.source === 'frontline-ai-ext' && m.id === id) { window.removeEventListener('message', on); clearTimeout(t); resolve(m); }
-      };
-      window.addEventListener('message', on);
-      const t = setTimeout(() => { window.removeEventListener('message', on); resolve({ error: 'Your AI tab did not answer in time — answer by hand instead.' }); }, ms);
-      window.postMessage({ source: 'frontline-ai', id, type: 'ask', prompt, timeoutMs: ms + 8000 }, '*');
-    });
-  }
-  function askMyAI(what, prompt, note, prior) {
-    return new Promise(resolve => {
-      const title = what === 'the month' ? 'The month needs the game master' : `A word with ${what} — needs the game master`;
-      sheet(`<h2>${esc(title)}</h2>
-      <p class="sub">${note ? `<b style="color:var(--red)">${esc(note)}</b><br>` : ''}The game master is <b>your own AI</b>, paste mode — the way it works:
-        1. Copy the prompt below. 2. Put it into the AI chat you keep open (Gemini, ChatGPT, Claude — any of them). 3. Copy its answer and paste it back here. Long replies are fine; the game picks out the JSON.</p>
-      <textarea class="orders" id="bb-prompt" readonly rows="7">${esc(prompt)}</textarea>
-      <div class="acts"><button class="btn primary" id="bb-copy">Copy prompt</button><span class="sub" style="margin:0">→ paste into:</span><button class="btn small" data-ai-tab="https://gemini.google.com/app">Gemini</button><button class="btn small" data-ai-tab="https://chatgpt.com/">ChatGPT</button><button class="btn small" data-ai-tab="https://claude.ai/new">Claude</button></div>
-      <h3>Paste the AI's reply</h3>
-      <textarea class="orders" id="bb-out" rows="7" placeholder="Paste the whole reply of the AI here — the game will find the JSON in it.">${esc(prior || '')}</textarea>
-      <div class="acts"><button class="btn primary" id="bb-ok">${note ? 'Try again' : 'Done'}</button><button class="btn" id="bb-skip">Skip — built-in rules run instead</button></div>`);
-      $('bb-copy').onclick = async () => {
-        try { await navigator.clipboard.writeText(prompt); $('bb-copy').textContent = 'Copied ✓'; setTimeout(() => { if ($('bb-copy')) $('bb-copy').textContent = 'Copy prompt'; }, 2000); }
-        catch (e) { const t = $('bb-prompt'); t.select(); if (document.execCommand) document.execCommand('copy'); toast('Prompt selected — copy it if it did not go to the clipboard.', 'info'); }
-      };
-      $('bb-ok').onclick = () => { const t = $('bb-out').value.trim(); closeSheet(); resolve(t); };
-      $('bb-skip').onclick = () => { closeSheet(); resolve(null); };
-      $('sheet').querySelectorAll('[data-ai-tab]').forEach(b => b.onclick = () => window.open(b.dataset.aiTab, '_blank'));
-      setTimeout(() => $('bb-out') && $('bb-out').focus(), 50);
-    });
-  }
-  // Settings: whose AI runs the world — the free server, or the user's own chat AI via the bridge.
-  function uiMyAI() {
-    const cfg = GM.myAI();
-    const opt = (val, label, desc) => `<label class="opt"><input type="radio" name="my-mode" value="${val}"${cfg.mode === val ? ' checked' : ''}><span><b>${label}</b><br>${desc}</span></label>`;
-    const tab = (url, name) => `<button class="btn small" data-ai-tab="${url}">${name}</button>`;
-    sheet(`<h2>Whose AI runs the world?</h2>
-      <p class="sub">The game master decides what every other nation does each month.</p>
-      <div class="myai">
-        ${opt('server', 'Default AI server', 'Free and managed. Occasionally out of free requests until reset; simple rules run meanwhile.')}
-        ${opt('manual', 'My own AI — no account (paste mode)', 'Use the actual Gemini / ChatGPT / Claude you already keep open in another tab. The game writes the full prompt; you copy it over and paste the reply back. Nothing to sign up for, no keys, no API.')}
-      </div>
-      <div class="acts">
-        <button class="btn primary" id="my-save">Save</button>
-        <button class="btn" id="my-x">Close</button>
-        <a class="btn" href="install.html" target="_blank" style="margin-left:auto" id="my-relay">Get the click-and-go relay ↗</a>
-      </div>
-      <p class="sub" style="margin-top:14px">No AI tab open yet? Pop one open here:</p>
-      <div class="acts">${tab('https://gemini.google.com/app', 'Gemini')}${tab('https://chatgpt.com/', 'ChatGPT')}${tab('https://claude.ai/new', 'Claude')}</div>`);
-    const mode = () => ($('sheet').querySelector('input[name=my-mode]:checked') || {}).value || 'server';
-    $('my-save').onclick = () => {
-      const m = mode();
-      GM.saveMyAI({ mode: m });
-      closeSheet(); updateBadge(); pingAI(); toast(m === 'manual' ? 'Paste mode saved: the game writes the prompt, your AI decides.' : 'Dropped back to the default AI server.', 'good');
-    };
-    $('my-x').onclick = closeSheet;
-    $('sheet').querySelectorAll('[data-ai-tab]').forEach(b => b.onclick = () => window.open(b.dataset.aiTab, '_blank'));
-    updateBadge();
-  }
   function waiting(title, text) { return `<div class="waiting"><div class="spinner"></div><b>${esc(title)}</b><p>${esc(text)}</p></div>`; }
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   function toast(text, kind, ms) {
@@ -952,7 +816,7 @@
   }
   function onKey(e) {
     if ($('game').hidden || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
-    if (e.key === 'Escape') { if ($('sheet').querySelector('#bb-prompt') || $('sheet').querySelector('#my-save')) return; if (!$('overlay').hidden && !busy) closeSheet(); else clearSel(); }
+    if (e.key === 'Escape') { if (!$('overlay').hidden && !busy) closeSheet(); else clearSel(); }
     if (busy || !$('overlay').hidden) return;
     if (e.key === ' ') { e.preventDefault(); setSpeed(speed ? 0 : lastSpeed); }
     if (e.key === '1' || e.key === '2' || e.key === '3') setSpeed(+e.key);
