@@ -9,6 +9,7 @@
   const miller = lat => 1.25 * Math.log(Math.tan(Math.PI / 4 + 0.4 * lat / R2D)) * R2D;
   const HAS_CANVAS = typeof Path2D !== 'undefined';
   const TS = 256, S0 = 0.125, MAXL = 10;          // tile size in device px; level 0 scale (device px per world unit)
+  const MAXZ = 16;                                // max zoom in CSS px per world unit: past this the relief art and data soften out
 
   let reliefImg = null;
   function relief() {
@@ -120,6 +121,7 @@
       this.geo = prepare(data);
       this.W = this.geo.W; this.H = this.geo.H;
       this.cam = { x: 0, y: 0, z: 1 };
+      this.anim = null; this.wheel = null;
       this.tiles = new Map(); this.pool = [];
       this.version = 0; this.labelsDirty = true; this.labelsAt = 0;
       this.hit = document.createElement('canvas').getContext('2d');
@@ -179,31 +181,66 @@
       const r = this.cv.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
       this.sw = r.width; this.sh = r.height; this.dpr = dpr;
       this.cv.width = Math.round(r.width * dpr); this.cv.height = Math.round(r.height * dpr);
+      this.anim = null; this.wheel = null;
       this.clamp();
     }
     fitZ() { return Math.min(this.sw / this.W, this.sh / this.H); }
     clamp() {
       const c = this.cam, zmin = this.fitZ();
-      c.z = Math.max(zmin, Math.min(40, c.z));
+      c.z = Math.max(zmin, Math.min(MAXZ, c.z));
       const vw = this.sw / c.z, vh = this.sh / c.z;
       c.x = vw >= this.W ? (this.W - vw) / 2 : Math.max(0, Math.min(this.W - vw, c.x));
       c.y = vh >= this.H ? (this.H - vh) / 2 : Math.max(0, Math.min(this.H - vh, c.y));
     }
     focus(p, z) { const pr = this.geo.provs[p]; this.focusAt(pr.lx, pr.ly, z); }
-    focusAt(x, y, z) {
-      this.cam.z = z || Math.max(this.cam.z, 3);
-      this.cam.x = x - this.sw / this.cam.z / 2; this.cam.y = y - this.sh / this.cam.z / 2;
-      this.clamp();
+    // Animate to a world point at a zoom level (buttery fly-to used by map clicks and "show" buttons).
+    flyTo(x, y, z, ms) {
+      z = Math.max(this.fitZ(), Math.min(MAXZ, z || this.cam.z));
+      const vw = this.sw / z, vh = this.sh / z;
+      const tx = vw >= this.W ? (this.W - vw) / 2 : Math.max(0, Math.min(this.W - vw, x - vw / 2));
+      const ty = vh >= this.H ? (this.H - vh) / 2 : Math.max(0, Math.min(this.H - vh, y - vh / 2));
+      this.anim = { t0: performance.now(), ms: ms || 480, from: { ...this.cam }, to: { x: tx, y: ty, z } };
+      this.wheel = null;
     }
+    focusAt(x, y, z) { this.flyTo(x, y, z, Math.min(650, 380 + Math.abs(Math.log2((z || 2.6) / this.cam.z)) * 180)); }
     toW(sx, sy) { return { x: sx / this.cam.z + this.cam.x, y: sy / this.cam.z + this.cam.y }; }
     toS(x, y) { return [(x - this.cam.x) * this.cam.z, (y - this.cam.y) * this.cam.z]; }
     // screen position of a lon/lat point
     llS(lon, lat) { return this.toS(this.geo.X(lon), this.geo.Y(lat)); }
     lonLatAt(sx, sy) { const w = this.toW(sx, sy); return [this.geo.lon(w.x), this.geo.lat(w.y)]; }
     provAt(sx, sy) { const w = this.toW(sx, sy); return this.geo.at(w.x, w.y); }
+    // Wheel zoom: the event sets a target zoom, draw() eases the camera toward it — smooth instead of instant jumps.
     zoomAt(sx, sy, f) {
-      const w = this.toW(sx, sy); this.cam.z *= f; this.clamp();
-      this.cam.x = w.x - sx / this.cam.z; this.cam.y = w.y - sy / this.cam.z; this.clamp();
+      const zmin = this.fitZ();
+      const cur = this.wheel ? this.wheel.zt : this.cam.z;
+      const zt = Math.max(zmin, Math.min(MAXZ, cur * f));
+      if (Math.abs(zt / this.cam.z - 1) < 0.002 && !this.wheel) return;
+      this.anim = null;
+      // anchor: keep the world point under the cursor under the cursor while the ease plays out
+      const w = this.toW(sx, sy);
+      this.wheel = { zt, sx, sy, w, t: 0 };
+    }
+    // Advance eased wheel zoom / fly-to. Called once per frame from draw().
+    stepCamera(now) {
+      if (this.anim) {
+        const a = this.anim, t = Math.min(1, (now - a.t0) / a.ms);
+        const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        this.cam.z = a.from.z + (a.to.z - a.from.z) * e;
+        this.cam.x = a.from.x + (a.to.x - a.from.x) * e;
+        this.cam.y = a.from.y + (a.to.y - a.from.y) * e;
+        this.clamp();
+        if (t >= 1) { if (Math.abs(a.to.z / this.cam.z - 1) < 0.002) { this.cam.x = a.to.x; this.cam.y = a.to.y; this.cam.z = a.to.z; } this.anim = null; }
+        this.interacting = true; this.lastInput = now;
+      } else if (this.wheel && this.wheel.zt !== this.cam.z) {
+        const w = this.wheel;
+        const dt = Math.min(64, now - (w.t || now)); w.t = now;
+        const nz = this.cam.z + (w.zt - this.cam.z) * (1 - Math.exp(-dt / 75));
+        this.cam.z = nz; this.clamp();
+        this.cam.x = w.w.x - w.sx / this.cam.z; this.cam.y = w.w.y - w.sy / this.cam.z;
+        this.clamp();
+        if (Math.abs(w.zt / this.cam.z - 1) < 0.003) { const zt = w.zt, sx = w.sx, sy = w.sy, pw = w.w; this.wheel = null; this.cam.z = zt; this.clamp(); this.cam.x = pw.x - sx / zt; this.cam.y = pw.y - sy / zt; this.clamp(); }
+        this.interacting = true; this.lastInput = now;
+      }
     }
     unitSize() { return Math.min(34, this.cam.z * 7); }
 
@@ -218,7 +255,15 @@
       if (img.complete && img.naturalWidth) {
         const kx = img.naturalWidth / this.W, ky = img.naturalHeight / this.H;
         const x0 = Math.max(0, t.x0), y0 = Math.max(0, t.y0), x1 = Math.min(this.W, t.x1), y1 = Math.min(this.H, t.y1);
-        if (x1 > x0 && y1 > y0) { c.imageSmoothingEnabled = true; c.drawImage(img, x0 * kx, y0 * ky, (x1 - x0) * kx, (y1 - y0) * ky, x0, y0, x1 - x0, y1 - y0); }
+        if (x1 > x0 && y1 > y0) {
+          // fade the relief out as it is stretched past what the picture can show: political colour and borders take over
+          const over = sc / this.dpr / (img.naturalWidth / this.W);
+          const alpha = over <= 1.6 ? 1 : Math.max(0.22, 1 - (over - 1.6) / 4);
+          c.globalAlpha = alpha;
+          c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+          c.drawImage(img, x0 * kx, y0 * ky, (x1 - x0) * kx, (y1 - y0) * ky, x0, y0, x1 - x0, y1 - y0);
+          c.globalAlpha = 1;
+        }
       }
       const pad = 1 / sc;
       const ids = geo.provsIn(t.x0 - pad, t.y0 - pad, t.x1 + pad, t.y1 + pad);
@@ -280,10 +325,12 @@
       return t;
     }
     // Nearest drawn tile above this one, for a blurry stand-in while it renders.
+    // Skip over-distant ancestors: a stand-in taken from a many-times-larger tile stretches
+    // a few source pixels across the whole viewport (the "phantom mini map" artifact).
     ancestor(L, tx, ty) {
       for (let l = L - 1; l >= 0; l--) {
         const f = 2 ** (L - l), t = this.tile(l, Math.floor(tx / f), Math.floor(ty / f), false);
-        if (t && t.ready) return { t, f, sx: (tx - Math.floor(tx / f) * f) * TS / f, sy: (ty - Math.floor(ty / f) * f) * TS / f };
+        if (t && t.ready) return f > 16 ? null : { t, f, sx: (tx - Math.floor(tx / f) * f) * TS / f, sy: (ty - Math.floor(ty / f) * f) * TS / f };
       }
       return null;
     }
@@ -302,12 +349,14 @@
       // render missing tiles first (nearest the centre), then stale ones, within a time budget
       const cx = cam.x + this.sw / cam.z / 2, cy = cam.y + this.sh / cam.z / 2;
       need.sort((a, b) => (a.ready - b.ready) || (a.L - b.L) * 0 || (((a.x0 + a.x1) / 2 - cx) ** 2 + ((a.y0 + a.y1) / 2 - cy) ** 2) - (((b.x0 + b.x1) / 2 - cx) ** 2 + ((b.y0 + b.y1) / 2 - cy) ** 2));
-      // while the view is moving, show stand-ins (a blurry parent tile) and only draw what has nothing to show at all
+      // while the view is moving, show stand-ins (a blurry parent tile) and only draw what has nothing to show at all;
+      // still render at least one tile per frame so the sharp map resolves quickly once motion stops
       const moving = this.interacting && now - this.lastInput < 180, t0 = performance.now();
+      let rendered = 0;
       for (const t of need) {
         const blank = !t.ready && (t.L === 0 || !this.ancestor(t.L, t.tx, t.ty));
-        if (!blank && (moving || performance.now() - t0 > 10)) continue;
-        this.renderTile(t);
+        if (!blank && (moving || (rendered && performance.now() - t0 > 10))) continue;
+        this.renderTile(t); rendered++;
       }
       ctx.imageSmoothingEnabled = true;
       for (const t of vis) {
@@ -365,8 +414,9 @@
 
     // ---------------------------------------------------------------- frame
     draw(now) {
-      const { ctx, cam, geo } = this, z = cam.z;
       if (!this.sw) return;
+      this.stepCamera(now);
+      const { ctx, cam, geo } = this, z = cam.z;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = '#1a2c3d'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
       this.drawTiles(ctx, now);
@@ -482,6 +532,7 @@
       const touch = () => { this.interacting = true; this.lastInput = performance.now(); };
       cv.addEventListener('pointerdown', e => {
         cv.setPointerCapture(e.pointerId);
+        this.anim = null; this.wheel = null;          // touching the map takes over from any camera animation
         const p = pt(e); ptrs.set(e.pointerId, p);
         if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; drag = { pinch: true, d0: Math.hypot(a.x - b.x, a.y - b.y), z0: this.cam.z, mid: this.toW((a.x + b.x) / 2, (a.y + b.y) / 2) }; return; }
         drag = { start: p, cam0: { ...this.cam }, moved: false, button: e.button };
@@ -512,7 +563,13 @@
       cv.addEventListener('pointerup', up);
       cv.addEventListener('pointercancel', up);
       cv.addEventListener('contextmenu', e => e.preventDefault());
-      cv.addEventListener('wheel', e => { e.preventDefault(); const p = pt(e); this.zoomAt(p.x, p.y, Math.pow(1.0018, -e.deltaY)); touch(); }, { passive: false });
+      cv.addEventListener('wheel', e => {
+        e.preventDefault();
+        const p = pt(e);
+        const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);   // lines / pages → pixels
+        this.zoomAt(p.x, p.y, Math.pow(1.0018, -dy));
+        touch();
+      }, { passive: false });
     }
   }
 
