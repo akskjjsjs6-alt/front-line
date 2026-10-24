@@ -122,7 +122,7 @@
       this.W = this.geo.W; this.H = this.geo.H;
       this.cam = { x: 0, y: 0, z: 1 };
       this.anim = null; this.wheel = null;
-      this.tiles = new Map(); this.pool = [];
+      this.tiles = new Map(); this.pool = []; this.cacheCap = 256;
       this.version = 0; this.labelsDirty = true; this.labelsAt = 0;
       this.hit = document.createElement('canvas').getContext('2d');
       this.textW = new Map();
@@ -182,6 +182,8 @@
       this.sw = r.width; this.sh = r.height; this.dpr = dpr;
       this.cv.width = Math.round(r.width * dpr); this.cv.height = Math.round(r.height * dpr);
       this.anim = null; this.wheel = null;
+      // tile cache bound: enough for the largest possible single view at this size, never fewer than 256
+      this.cacheCap = Math.max(256, (Math.ceil(this.sw * dpr / TS) + 2) * (Math.ceil(this.sh * dpr / TS) + 2) + 48);
       this.clamp();
     }
     fitZ() { return Math.min(this.sw / this.W, this.sh / this.H); }
@@ -321,8 +323,18 @@
       if (!cv) { cv = document.createElement('canvas'); cv.width = cv.height = TS; }
       t = { L, tx, ty, cv, x0: tx * tw, y0: ty * tw, x1: (tx + 1) * tw, y1: (ty + 1) * tw, dirty: true, ready: false };
       this.tiles.set(k, t);
-      while (this.tiles.size > 180) { const [ok, old] = this.tiles.entries().next().value; this.tiles.delete(ok); this.pool.push(old.cv); }
       return t;
+    }
+    // Shrink the tile cache, oldest (least recently used) first. Only ever called before a
+    // frame's tile list is built or after a frame is drawn — evicting mid-frame would recycle
+    // a canvas that the draw list still references, leaving stale content in the wrong place.
+    trimTiles(maxKeep, keep) {
+      for (const [k, t] of this.tiles) {
+        if (this.tiles.size <= maxKeep) break;
+        if (keep && keep.has(t)) continue;
+        this.tiles.delete(k); this.pool.push(t.cv);
+      }
+      if (this.pool.length > this.cacheCap) this.pool.length = this.cacheCap;   // canvases beyond the bound go to the GC
     }
     // Nearest drawn tile above this one, for a blurry stand-in while it renders.
     // Skip over-distant ancestors: a stand-in taken from a many-times-larger tile stretches
@@ -365,6 +377,7 @@
         if (t.ready) ctx.drawImage(t.cv, dx, dy, ex - dx, ey - dy);
         else { const a = this.ancestor(t.L, t.tx, t.ty); if (a) ctx.drawImage(a.t.cv, a.sx, a.sy, TS / a.f, TS / a.f, dx, dy, ex - dx, ey - dy); }
       }
+      this.trimTiles(this.cacheCap);   // back to the working bound once nothing holds tile references
     }
 
     // ---------------------------------------------------------------- labels (drawn every frame, on top of the tiles)
