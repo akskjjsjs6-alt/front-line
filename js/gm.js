@@ -5,13 +5,19 @@
   const AI_URL = 'https://spvwcsaytriytosozzou.supabase.co/functions/v1/ai';
   const W = () => root.World;
 
-  async function call(body, ms) {
+  async function call(body, ms, tries) {
     const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms || 150000);
     try {
       const res = await fetch(AI_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ctl.signal });
       const out = await res.json().catch(() => ({ error: 'Bad reply from the AI server' }));
       if (!res.ok || out.error) throw new Error(out.error || `AI server error ${res.status}`);
       return out;
+    } catch (e) {
+      if (!tries) {                                                    // network blips and timeouts get one quiet retry
+        await new Promise(r => setTimeout(r, 1500));
+        return call(body, ms, 1);
+      }
+      throw e;
     } finally { clearTimeout(t); }
   }
 

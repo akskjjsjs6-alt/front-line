@@ -54,7 +54,9 @@
     for (let y = 0; y < cv.height; y += 40) { c.beginPath(); c.moveTo(0, y); c.lineTo(cv.width, y); c.stroke(); }
   }
   function drawPreview(cv, d, pid) { WorldMap.renderPreview(cv, d, W.newGame(d, pid)); }
+  let pingTimer = 0;
   async function pingAI() {
+    clearTimeout(pingTimer);
     try {
       const res = await fetch(GM.AI_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'ping' }) });
       const out = await res.json().catch(() => ({}));
@@ -62,6 +64,8 @@
     } catch (e) { aiState = 'off'; }
     $('ai-status').textContent = aiState === 'on' ? 'AI game master: online. Other nations are played by an AI.' : 'AI game master: offline right now. You can still play; nations follow simple built-in rules until it is back.';
     updateBadge();
+    // keep checking while offline so the badge (and the real AI) come back on their own
+    if (aiState !== 'on') pingTimer = setTimeout(pingAI, 20000);
   }
   function updateBadge() {
     const b = $('ai-badge'); if (!b) return;
@@ -581,7 +585,7 @@
       hist.push({ role: 'player', text }); pending = null; draw();
       log.insertAdjacentHTML('beforeend', `<div class="typing">${esc(n.leader || n.name)} is writing…</div>`); log.scrollTop = log.scrollHeight;
       const { res, online, error } = await GM.chat(data, g, i, text);
-      if (!online) { aiState = 'off'; updateBadge(); if (error) console.warn(error); } else { aiState = 'on'; updateBadge(); }
+      if (!online) { aiState = 'off'; updateBadge(); pingTimer = setTimeout(pingAI, 20000); if (error) console.warn(error); } else { aiState = 'on'; updateBadge(); }
       hist.push({ role: 'leader', text: res.reply });
       W.addRel(g, i, g.player, Math.max(-20, Math.min(20, Number(res.relation_change) || 0)));
       pending = res.agreement && res.agreement.kind !== 'none' ? res.agreement : null;
@@ -665,7 +669,7 @@
     try {
       const { online, res, error } = await GM.runTurn(data, g, { orders, diplomacy: diplo, battles: facts });
       aiState = online ? 'on' : 'off'; updateBadge();
-      if (!online) console.warn('AI offline:', error);
+      if (!online) { console.warn('AI offline:', error); pingTimer = setTimeout(pingAI, 20000); }
       GM.applyTurn(data, g, res);
       W.checkAlive(g);
       map.paint();
