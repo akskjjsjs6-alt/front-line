@@ -49,7 +49,7 @@
       mode: 'turn', date: W().dateLabel(g), period: g.period,
       player: Object.assign(nationInfo(data, g, g.player, true), { money: Math.round(g.nations[g.player].money) }),
       orders: ctx.orders || '', diplomacy: ctx.diplomacy || [], battles: ctx.battles || [],
-      world: worldSummary(data, g), history: g.history.slice(-14)
+      world: worldSummary(data, g), history: g.history.slice(-14), timeline: W().upcoming(g, 5)
     };
     try {
       const res = await call(body);
@@ -63,6 +63,11 @@
     for (const ch of res.changes || []) {
       try { const n = W().applyChange(data, g, ch); if (n) notes.push(n); } catch (e) { console.warn('change failed', ch, e); }
     }
+    for (const m of res.messages_to_player || []) {
+      const i = W().findNation(g, m.from);
+      if (i >= 0 && i !== g.player && m.text) g.inbox.push({ from: i, text: String(m.text).slice(0, 1500), date: W().dateLabel(g), read: false });
+    }
+    if (g.inbox.length > 30) g.inbox.splice(0, g.inbox.length - 30);
     g.history.push(`${W().dateLabel(g)}: ${res.headline}`);
     for (const ev of (res.events || []).slice(0, 4)) g.history.push(`${W().dateLabel(g)}: ${ev.title}`);
     if (g.history.length > 60) g.history.splice(0, g.history.length - 60);
@@ -77,7 +82,7 @@
   };
   function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
   function offlineTurn(data, g, ctx) {
-    const Wd = W(), events = [], changes = [];
+    const Wd = W(), events = Wd.applyTimeline(data, g), changes = [], messages = [];
     const alive = g.nations.map((n, i) => i).filter(i => g.nations[i].alive);
     for (let k = 0; k < 2; k++) {
       const i = pick(alive.filter(i => g.nations[i].great || Math.random() < 0.2)), n = g.nations[i];
@@ -88,7 +93,7 @@
     }
     // wars of opportunity between hostile neighbours
     for (const i of alive) {
-      if (i === g.player || Math.random() > 0.015) continue;
+      if (i === g.player || Math.random() > 0.03) continue;
       const n = g.nations[i];
       const targets = new Set();
       Wd.provincesOf(g, i).forEach(p => data.provinces[p].nb.forEach(q => { const o = g.owner[q]; if (o >= 0 && o !== i) targets.add(o); }));
@@ -99,6 +104,15 @@
           break;
         }
       }
+    }
+    // a hostile, stronger neighbour makes demands of the player
+    for (const i of alive) {
+      if (i === g.player || Math.random() > 0.05 || Wd.rel(g, i, g.player) > -40 || Wd.atWar(g, i, g.player)) continue;
+      if (Wd.divisions(g, i) < Wd.divisions(g, g.player) * 1.3) continue;
+      const theirs = Wd.provincesOf(g, g.player).filter(p => data.provinces[p].nb.some(q => g.owner[q] === i));
+      if (!theirs.length) continue;
+      messages.push({ from: g.nations[i].name, text: `Our patience is at an end. Hand over ${data.provinces[theirs[0]].n} to us, or face the consequences.` });
+      break;
     }
     // tired wars end
     for (const i of alive) for (const j of g.nations[i].wars) {
@@ -112,7 +126,7 @@
     return {
       headline: war ? 'The guns do not fall silent' : pick(['A quiet month in the chancelleries', 'Diplomats trade notes as the world turns', 'Markets steady, generals restless']),
       summary: war ? `${war} battle${war > 1 ? 's were' : ' was'} fought this month.` : 'No great power made a decisive move this month.',
-      events, player_results, changes
+      events, player_results, changes, messages_to_player: messages
     };
   }
 

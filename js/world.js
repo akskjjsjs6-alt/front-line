@@ -5,7 +5,7 @@
   // ------------------------------------------------------------------ periods
   const PERIODS = {
     '1900': {
-      id: '1900', file: 'data/world-1900.json', start: [1900, 1], title: 'The Age of Empires', speed: 2, recruitCost: 6,
+      id: '1900', file: 'data/world-1900.json', start: [1900, 1], title: 'The Age of Empires', km: 280, recruitCost: 6,
       blurb: 'Queen Victoria still reigns. Europe\'s empires cover the globe, the Boer War rages and China simmers. Fourteen years of peace remain, unless someone breaks it sooner.',
       units: { inf: 0.7, recon: 0.2, art: 0.1 },
       wars: [['United Kingdom', 'Transvaal'], ['United Kingdom', 'Orange Free State']],
@@ -13,7 +13,7 @@
       hostile: [['France', 'Germany', -45], ['Russia', 'Japan', -40], ['United Kingdom', 'Russia', -25], ['Austria-Hungary', 'Serbia', -30], ['Russia', 'Ottoman Empire', -35], ['United Kingdom', 'France', -15]]
     },
     '1939': {
-      id: '1939', file: 'data/world-1938.json', start: [1939, 3], title: 'The Gathering Storm', speed: 3, recruitCost: 8,
+      id: '1939', file: 'data/world-1939.json', start: [1939, 3], title: 'The Gathering Storm', km: 450, recruitCost: 8,
       blurb: 'Germany has swallowed Austria and eyes Poland. Japan is at war in China. Britain and France promise to defend Poland. The world holds its breath.',
       units: { inf: 0.55, mech: 0.15, armor: 0.12, recon: 0.06, art: 0.1, ad: 0.02 },
       wars: [['Japan', 'China']],
@@ -21,7 +21,7 @@
       hostile: [['Germany', 'Poland', -50], ['Germany', 'France', -40], ['Germany', 'United Kingdom', -25], ['USSR', 'Germany', -35], ['Japan', 'USSR', -45], ['Japan', 'United States', -30], ['Italy', 'France', -25], ['Hungary', 'Romania', -35], ['Germany', 'Czechoslovakia', -60]]
     },
     '2003': {
-      id: '2003', file: 'data/world-2000.json', start: [2003, 1], title: 'The New Century', speed: 4, recruitCost: 14,
+      id: '2003', file: 'data/world-2003.json', start: [2003, 1], title: 'The New Century', km: 650, recruitCost: 14,
       blurb: 'The only superpower prepares to invade Iraq. Russia rebuilds under Putin, China rises fast, and old feuds smoulder from Kashmir to Korea.',
       units: { inf: 0.3, mech: 0.25, armor: 0.2, recon: 0.07, art: 0.08, mlrs: 0.04, ad: 0.02, heli: 0.03, uas: 0.01 },
       wars: [],
@@ -195,13 +195,6 @@
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const rnd = (g) => { g.seed = (g.seed * 1664525 + 1013904223) >>> 0; return g.seed / 4294967296; };
 
-  function decodeGrid(data) {
-    const grid = new Int32Array(data.w * data.h); let k = 0;
-    const r = data.rle;
-    for (let i = 0; i < r.length; i += 2) { grid.fill(r[i], k, k + r[i + 1]); k += r[i + 1]; }
-    return grid;
-  }
-
   // ------------------------------------------------------------------ setup
   function newGame(data, periodId, playerName) {
     const P = PERIODS[periodId], prof = PROFILES[periodId] || {};
@@ -240,7 +233,7 @@
         for (const q of data.provinces[p].nb) { const o = g.owner[q]; if (o >= 0 && o !== i) s += (g.nations[o].great ? 3 : 1) + Math.max(0, -rel(g, i, o)) / 10 + (atWar(g, i, o) ? 20 : 0); }
         return [p, s];
       }).sort((a, b) => b[1] - a[1]);
-      const groups = Math.min(scored.length, Math.max(1, Math.min(6, Math.round(left / 6))));
+      const groups = Math.min(scored.length, Math.max(1, Math.min(8, Math.round(left / 5))));
       for (let k = 0; k < groups && left > 0.5; k++) {
         const d = k === groups - 1 ? left : Math.max(1, Math.round(left / (groups - k)));
         addArmy(g, i, scored[k][0], d); left -= d;
@@ -249,6 +242,8 @@
     });
     mergeArmies(g);
     g.player = idx(playerName);
+    g.generals = []; g.inbox = [];
+    if (g.player >= 0) initGenerals(data, g);
     for (const n of g.nations) n.money = Math.round(income(data, g, g.nations.indexOf(n)) * 3);
     return g;
   }
@@ -359,6 +354,12 @@
     return g.nations[n].cap;
   }
   function neighbours(data, p) { const pr = data.provinces[p]; return pr.sea ? pr.nb.concat(pr.sea) : pr.nb; }
+  // great-circle distance between two provinces' centres, in km
+  function km(data, a, b) {
+    const A = data.provinces[a], B = data.provinces[b], r = Math.PI / 180;
+    const s1 = Math.sin((B.y - A.y) * r / 2), s2 = Math.sin((B.x - A.x) * r / 2);
+    return 12742 * Math.asin(Math.sqrt(s1 * s1 + Math.cos(A.y * r) * Math.cos(B.y * r) * s2 * s2));
+  }
   function borderProvinces(data, g, n) {
     const out = [];
     data.provinces.forEach((p, i) => { if (g.owner[i] === n && p.nb.some(q => g.owner[q] >= 0 && g.owner[q] !== n)) out.push(i); });
@@ -366,7 +367,7 @@
   }
 
   // ------------------------------------------------------------------ economy
-  function provValue(data, p) { return Math.min(4, 0.6 + data.provinces[p].a / 250); }
+  function provValue(data, p) { const pr = data.provinces[p]; return Math.min(5, 0.3 + Math.log10(1 + (pr.pop || 0)) * 0.5 + pr.a / 500); }
   // Income comes mostly from the national economy (scaled by how much of the country you still control), plus land.
   function income(data, g, n) {
     let land = 0, own = 0, held = 0;
@@ -377,7 +378,7 @@
       if (g.ctrl[p] === n) { held += a; land += provValue(data, p); }
     }
     const N = g.nations[n];
-    return 2 + (N.eco * 0.22 * (own ? held / own : 0) + land * 0.4) * (0.6 + N.stab / 250);
+    return 2 + (N.eco * 0.22 * (own ? held / own : 0) + land * 0.12) * (0.6 + N.stab / 250);
   }
   function divisions(g, n) { return g.armies.reduce((s, a) => s + (a.n === n ? a.div : 0), 0); }
   function upkeep(g, n) { return divisions(g, n) * 0.12; }
@@ -411,16 +412,21 @@
     for (let p = 0; p < data.provinces.length; p++) if (p !== from && data.provinces[p].c && canEnter(g, n, p)) out.push(p);
     return out;
   }
+  // Provinces an army can reach this turn (Dijkstra on km): map province -> path
   function reachable(data, g, army) {
-    const steps = PERIODS[g.period].speed, out = new Map([[army.p, []]]), q = [[army.p, []]];
-    while (q.length) {
-      const [p, path] = q.shift();
-      if (path.length >= steps) continue;
-      if (path.length && hostileHere(g, army.n, p)) continue;   // stop when entering enemy ground
+    const budget = PERIODS[g.period].km, best = new Map([[army.p, 0]]), out = new Map([[army.p, []]]);
+    const open = [[0, army.p]];
+    while (open.length) {
+      open.sort((a, b) => a[0] - b[0]);
+      const [d, p] = open.shift();
+      if (d > best.get(p)) continue;
+      if (p !== army.p && hostileHere(g, army.n, p)) continue;   // stop when entering enemy ground
       for (const x of neighbours(data, p)) {
-        if (out.has(x) || !canEnter(g, army.n, x)) continue;
-        const np = path.concat([x]);
-        out.set(x, np); q.push([x, np]);
+        if (!canEnter(g, army.n, x)) continue;
+        const nd = d + km(data, p, x) * (data.provinces[p].nb.includes(x) ? 1 : 1.4);
+        if (nd > budget && d > 0) continue;                       // always allow one step
+        if (best.has(x) && best.get(x) <= nd) continue;
+        best.set(x, nd); out.set(x, out.get(p).concat([x])); open.push([nd, x]);
       }
     }
     // overseas: coasts not reachable on foot this turn
@@ -446,16 +452,18 @@
   function pathLen(prev, p) { let n = 0; for (let c = p; prev.get(c) !== -1 && prev.has(c); c = prev.get(c)) n++; return n; }
 
   function moveArmies(data, g, which) {
-    const steps = PERIODS[g.period].speed;
+    const budget = PERIODS[g.period].km;
     for (const a of g.armies) {
       if (!which(a) || !a.path.length) continue;
-      let n = 0;
-      while (a.path.length && n < steps) {
+      let used = 0, n = 0;
+      while (a.path.length) {
         const nx = a.path[0];
         if (!canEnter(g, a.n, nx)) { a.path = []; break; }
         const bySea = !neighbours(data, a.p).includes(nx);
         if (bySea && n > 0) break;                 // embarking takes the whole turn
-        a.p = nx; a.path.shift(); n++; a.moved = true;
+        const cost = bySea ? budget : km(data, a.p, nx);
+        if (n > 0 && used + cost > budget) break;
+        a.p = nx; a.path.shift(); n++; used += cost; a.moved = true;
         if (bySea) { a.org = Math.max(10, a.org - 20); break; }
         if (hostileHere(g, a.n, nx)) break;
       }
@@ -596,7 +604,7 @@
     g.nations.forEach((n, i) => {
       if (i === g.player || !n.alive) return;
       const mine = g.armies.filter(a => a.n === i);
-      if (!n.wars.length) { for (const a of mine) if (!a.path.length && g.ctrl[a.p] !== i && !allied(g, i, g.ctrl[a.p])) a.path = pathTo(data, g, i, a.p, p => g.ctrl[p] === i, 20) || []; return; }
+      if (!n.wars.length) { for (const a of mine) if (!a.path.length && g.ctrl[a.p] !== i && !allied(g, i, g.ctrl[a.p])) a.path = pathTo(data, g, i, a.p, p => g.ctrl[p] === i, 40) || []; return; }
       const bold = n.wars.some(w => (g.starter || {})[key(i, w)] === i);
       const enemyAt = p => g.armies.filter(e => e.p === p && atWar(g, i, e.n));
       const isEnemyLand = p => { const c = g.ctrl[p]; return c >= 0 && atWar(g, i, c); };
@@ -622,9 +630,9 @@
         while (have < need && free.size) {
           let best = null, bd = 99;
           for (const a of free) { const d = dist(data, a.p, f.p); if (d < bd) { bd = d; best = a; } }
-          if (!best || bd > 5) break;
+          if (!best || bd > 9) break;
           free.delete(best);
-          const pth = pathTo(data, g, i, best.p, p => p === f.p, 8);
+          const pth = pathTo(data, g, i, best.p, p => p === f.p, 14);
           if (pth) { best.path = pth; have += sidePower(g, [best]); }
         }
         // surplus on a quiet sector is released for the attack
@@ -653,18 +661,18 @@
         }
         if (best) { a.path = best; continue; }
         if (!bold && front.length) { // defenders move up to the front and wait
-          const f = front[0]; if (a.p !== f.p) a.path = pathTo(data, g, i, a.p, p => p === f.p, 10) || [];
+          const f = front[0]; if (a.p !== f.p) a.path = pathTo(data, g, i, a.p, p => p === f.p, 18) || [];
           continue;
         }
-        const pth = pathTo(data, g, i, a.p, isEnemyLand, 25);
+        const pth = pathTo(data, g, i, a.p, isEnemyLand, 45);
         if (pth) { a.path = pth; continue; }
         // no land route: ship troops from a port to the weakest enemy coast
         if (n.great || n.tech >= 1) {
-          if (!isPort(data, g, i, a.p)) { a.path = pathTo(data, g, i, a.p, p => isPort(data, g, i, p), 12) || []; continue; }
+          if (!isPort(data, g, i, a.p)) { a.path = pathTo(data, g, i, a.p, p => isPort(data, g, i, p), 20) || []; continue; }
           let target = null, ts = -Infinity;
           for (const p of seaTargets(data, g, i, a.p)) {
             if (!isEnemyLand(p)) continue;
-            const sc = -sidePower(g, enemyAt(p)) * 2 + data.provinces[p].a / 200 - Math.hypot(data.provinces[p].x - data.provinces[a.p].x, data.provinces[p].y - data.provinces[a.p].y) / 200;
+            const sc = -sidePower(g, enemyAt(p)) * 2 + data.provinces[p].a / 200 - km(data, p, a.p) / 800;
             if (sc > ts) { ts = sc; target = p; }
           }
           if (target != null) a.path = [target];
@@ -675,7 +683,7 @@
   function dist(data, a, b) {
     if (a === b) return 0;
     const seen = new Set([a]); let frontier = [a];
-    for (let d = 1; d <= 6; d++) {
+    for (let d = 1; d <= 10; d++) {
       const nxt = [];
       for (const p of frontier) for (const x of neighbours(data, p)) { if (x === b) return d; if (!seen.has(x)) { seen.add(x); nxt.push(x); } }
       frontier = nxt;
@@ -683,10 +691,193 @@
     return 99;
   }
 
+  // ------------------------------------------------------------------ generals
+  // The player hands armies to generals and gives each one standing orders; the general moves them every turn.
+  const GENERAL_NAMES = {
+    '1900': { 'United Kingdom': ['Lord Roberts', 'Herbert Kitchener', 'Redvers Buller', 'Evelyn Wood'], 'Germany': ['Alfred von Schlieffen', 'Colmar von der Goltz', 'Paul von Hindenburg'],
+      'France': ['Joseph Joffre', 'Joseph Gallieni', 'Ferdinand Foch'], 'Russia': ['Aleksey Kuropatkin', 'Nikolai Linevich', 'Aleksei Brusilov'],
+      'Austria-Hungary': ['Franz Conrad von Hötzendorf', 'Oskar Potiorek'], 'Japan': ['Ōyama Iwao', 'Nogi Maresuke', 'Kodama Gentarō'],
+      'United States': ['Nelson Miles', 'Arthur MacArthur', 'Leonard Wood'], 'Ottoman Empire': ['Colmar von der Goltz Pasha', 'Mahmud Shevket Pasha'],
+      'Italy': ['Luigi Cadorna', 'Alberto Pollio'], 'Qing China': ['Yuan Shikai', 'Nie Shicheng'], 'Transvaal': ['Louis Botha', 'Koos de la Rey', 'Piet Joubert'] },
+    '1939': { 'Germany': ['Gerd von Rundstedt', 'Fedor von Bock', 'Heinz Guderian', 'Erich von Manstein', 'Erwin Rommel'],
+      'France': ['Maurice Gamelin', 'Alphonse Georges', 'Gaston Billotte'], 'United Kingdom': ['Lord Gort', 'Bernard Montgomery', 'Archibald Wavell'],
+      'USSR': ['Georgy Zhukov', 'Semyon Timoshenko', 'Konstantin Rokossovsky', 'Ivan Konev'], 'Poland': ['Edward Rydz-Śmigły', 'Tadeusz Kutrzeba', 'Władysław Bortnowski'],
+      'Italy': ['Rodolfo Graziani', 'Italo Balbo', 'Ugo Cavallero'], 'Japan': ['Tomoyuki Yamashita', 'Masaharu Homma', 'Hisaichi Terauchi'],
+      'United States': ['George Marshall', 'Douglas MacArthur', 'George Patton', 'Dwight Eisenhower'], 'China': ['Xue Yue', 'Li Zongren', 'Bai Chongxi'],
+      'Finland': ['Carl Gustaf Mannerheim'], 'Czechoslovakia': ['Ludvík Krejčí'] },
+    '2003': { 'United States': ['Tommy Franks', 'William Wallace', 'David Petraeus', 'James Mattis'], 'United Kingdom': ['Brian Burridge', 'Robin Brims'],
+      'Russia': ['Valery Gerasimov', 'Yuri Baluyevsky', 'Vladimir Shamanov'], 'China': ['Liang Guanglie', 'Guo Boxiong'], 'Iraq': ['Ali Hassan al-Majid', 'Qusay Hussein', 'Raad al-Hamdani'],
+      'Iran': ['Qasem Soleimani', 'Yahya Rahim Safavi'], 'Israel': ['Moshe Ya\'alon', 'Dan Halutz'], 'Syria': ['Hassan Turkmani', 'Ali Habib Mahmoud'],
+      'India': ['N. C. Vij', 'J. J. Singh'], 'Pakistan': ['Pervez Musharraf', 'Ashfaq Kayani'], 'Turkey': ['Hilmi Özkök', 'Yaşar Büyükanıt'], 'Ukraine': ['Oleksandr Zatynaiko'] }
+  };
+  const GEN_COLORS = ['#ffcf5a', '#7fe0b4', '#ff9de0', '#9fb7ff', '#ffa45c', '#c4f06a'];
+  function generalName(g, n, k) {
+    const list = (GENERAL_NAMES[g.period] || {})[g.nations[n].name];
+    if (list && list[k]) return 'Gen. ' + list[k];
+    const ranks = ['1st', '2nd', '3rd', '4th', '5th', '6th'];
+    return `${ranks[k] || (k + 1) + 'th'} Army Group`;
+  }
+  function addGeneral(g, n) {
+    g.generals = g.generals || [];
+    const k = g.generals.filter(x => x.n === n).length;
+    const gen = { id: (g.nextGen = (g.nextGen || 1) + 1), n, name: generalName(g, n, k), color: GEN_COLORS[k % GEN_COLORS.length], armies: [], order: { kind: 'hold' } };
+    g.generals.push(gen);
+    return gen;
+  }
+  function generalOf(g, army) { return (g.generals || []).find(x => x.armies.includes(army.id)); }
+  function assignArmy(g, gen, army) {
+    for (const o of g.generals || []) o.armies = o.armies.filter(id => id !== army.id);
+    if (gen) gen.armies.push(army.id);
+  }
+  // Split the player's starting armies between a few generals by region.
+  function initGenerals(data, g) {
+    const mine = g.armies.filter(a => a.n === g.player);
+    const k = Math.max(1, Math.min(3, Math.round(mine.length / 3)));
+    const gens = []; for (let i = 0; i < k; i++) gens.push(addGeneral(g, g.player));
+    const pts = mine.map(a => [data.provinces[a.p].x, data.provinces[a.p].y]);
+    // farthest-point start so every general gets a region
+    let cent = [pts[0].slice()];
+    while (cent.length < k) {
+      let best = null, bd = -1;
+      for (const p of pts) { const d = Math.min(...cent.map(c => (c[0] - p[0]) ** 2 + (c[1] - p[1]) ** 2)); if (d > bd) { bd = d; best = p; } }
+      cent.push(best.slice());
+    }
+    for (let it = 0; it < 8; it++) {
+      const sum = cent.map(() => [0, 0, 0]);
+      pts.forEach(p => { let b = 0, bd = Infinity; cent.forEach((c, j) => { const d = (c[0] - p[0]) ** 2 + (c[1] - p[1]) ** 2; if (d < bd) { bd = d; b = j; } }); sum[b][0] += p[0]; sum[b][1] += p[1]; sum[b][2]++; });
+      cent = cent.map((c, j) => sum[j][2] ? [sum[j][0] / sum[j][2], sum[j][1] / sum[j][2]] : c);
+    }
+    mine.forEach((a, i) => { const p = pts[i]; let b = 0, bd = Infinity; cent.forEach((c, j) => { const d = (c[0] - p[0]) ** 2 + (c[1] - p[1]) ** 2; if (d < bd) { bd = d; b = j; } }); gens[b].armies.push(a.id); });
+    // the army in the capital stays under direct command
+    const capArmy = mine.find(a => a.p === g.nations[g.player].cap);
+    if (capArmy && mine.length > 1) assignArmy(g, null, capArmy);
+  }
+  // Provinces of `me` facing nation `t` (directly, or the closest ones if there is no shared border).
+  function frontWith(data, g, me, t) {
+    const out = [];
+    for (let p = 0; p < g.ctrl.length; p++) {
+      if (g.ctrl[p] !== me) continue;
+      if (data.provinces[p].nb.some(q => g.ctrl[q] === t)) out.push(p);
+    }
+    if (out.length) return out;
+    const theirCap = g.nations[t].cap, mine = [];
+    for (let p = 0; p < g.ctrl.length; p++) if (g.ctrl[p] === me) mine.push(p);
+    return mine.sort((a, b) => km(data, a, theirCap) - km(data, b, theirCap)).slice(0, 3);
+  }
+  // Spread armies along front provinces, most threatened first.
+  function holdFront(data, g, me, armies, front) {
+    if (!front.length || !armies.length) return;
+    const threat = p => { let t = 0.5; for (const q of data.provinces[p].nb) t += sidePower(g, g.armies.filter(e => e.p === q && atWar(g, me, e.n))); return t; };
+    const ranked = front.map(p => ({ p, t: threat(p) })).sort((a, b) => b.t - a.t);
+    const slots = [];
+    for (let k = 0; slots.length < armies.length; k++) slots.push(ranked[k % ranked.length].p);
+    const free = new Set(armies);
+    for (const p of slots) {
+      let best = null, bd = Infinity;
+      for (const a of free) { const d = km(data, a.p, p); if (d < bd) { bd = d; best = a; } }
+      if (!best) break;
+      free.delete(best);
+      best.path = best.p === p ? [] : (pathTo(data, g, me, best.p, q => q === p, 60) || []);
+    }
+  }
+  function attackWith(data, g, me, armies, isTarget, fallbackFront) {
+    const enemyAt = p => g.armies.filter(e => e.p === p && atWar(g, me, e.n));
+    const left = [];
+    for (const a of armies) {
+      const myPower = sidePower(g, [a]);
+      let best = null, bs = -Infinity;
+      for (const [p, path] of reachable(data, g, a)) {
+        if (!path.length || !isTarget(p)) continue;
+        const ep = sidePower(g, enemyAt(p)) * 1.25;
+        const friends = armies.filter(f => f !== a && f.path.length && f.path[f.path.length - 1] === p);
+        const odds = (myPower + sidePower(g, friends)) / (ep + 0.01);
+        if (ep > 0 && odds < 1.0) continue;
+        const isCap = g.nations.some(nn => nn.cap === p);
+        const sc = (isCap ? 6 : 0) + provValue(data, p) + Math.min(odds, 3) - path.length * 0.4 - (path.sea ? 3 : 0);
+        if (sc > bs) { bs = sc; best = path; }
+      }
+      if (best) a.path = best; else left.push(a);
+    }
+    // the rest push toward the target
+    for (const a of left) a.path = pathTo(data, g, me, a.p, isTarget, 60) || [];
+    const stuck = left.filter(a => !a.path.length);
+    if (stuck.length && fallbackFront) holdFront(data, g, me, stuck, fallbackFront);
+  }
+  // Give the player's generals' armies their paths for this turn. Returns notes for the UI.
+  function runGenerals(data, g) {
+    const notes = [];
+    for (const gen of g.generals || []) {
+      if (gen.n !== g.player) continue;
+      gen.armies = gen.armies.filter(id => g.armies.some(a => a.id === id));
+      const armies = g.armies.filter(a => gen.armies.includes(a.id) && !a.manual);
+      if (!armies.length) continue;
+      const o = gen.order || { kind: 'hold' }, me = g.player;
+      for (const a of armies) a.path = [];
+      if (o.kind === 'front' && o.target != null) holdFront(data, g, me, armies, frontWith(data, g, me, o.target));
+      else if (o.kind === 'attack' && o.target != null) {
+        if (!atWar(g, me, o.target)) { holdFront(data, g, me, armies, frontWith(data, g, me, o.target)); notes.push(`${gen.name}: not at war with ${g.nations[o.target].name}, holding the border instead.`); }
+        else attackWith(data, g, me, armies, p => g.ctrl[p] === o.target || (g.ctrl[p] >= 0 && allied(g, g.ctrl[p], o.target) && atWar(g, me, g.ctrl[p])), frontWith(data, g, me, o.target));
+      } else if (o.kind === 'seize' && o.prov != null) {
+        const c = g.ctrl[o.prov];
+        if (c === me) { holdFront(data, g, me, armies, [o.prov].concat(data.provinces[o.prov].nb.filter(q => g.ctrl[q] === me))); }
+        else if (c >= 0 && !atWar(g, me, c)) notes.push(`${gen.name}: not at war with ${g.nations[c].name}, cannot take ${data.provinces[o.prov].n}.`);
+        else attackWith(data, g, me, armies, p => p === o.prov || (data.provinces[o.prov].nb.includes(p) && g.ctrl[p] >= 0 && atWar(g, me, g.ctrl[p])));
+      } else if (o.kind === 'defend' && o.prov != null) {
+        holdFront(data, g, me, armies, [o.prov].concat(data.provinces[o.prov].nb.filter(q => g.ctrl[q] === me)).slice(0, Math.max(1, armies.length)));
+      }
+    }
+    for (const a of g.armies) a.manual = false;
+    return notes;
+  }
+
+  // ------------------------------------------------------------------ the historical timeline
+  // What actually happened. AI nations tend to follow it unless the world has changed too much.
+  const TIMELINE = {
+    '1900': [[1904, 2, 'war', 'Japan', 'Russia', 'Russo-Japanese War'], [1905, 9, 'peace', 'Japan', 'Russia', 'Treaty of Portsmouth'],
+      [1911, 9, 'war', 'Italy', 'Ottoman Empire', 'Italo-Turkish War'], [1912, 10, 'war', 'Bulgaria', 'Ottoman Empire', 'First Balkan War'],
+      [1912, 10, 'war', 'Serbia', 'Ottoman Empire', 'First Balkan War'], [1912, 10, 'war', 'Greece', 'Ottoman Empire', 'First Balkan War'],
+      [1914, 7, 'war', 'Austria-Hungary', 'Serbia', 'The July Crisis'], [1914, 8, 'war', 'Germany', 'Russia', 'The Great War'],
+      [1914, 8, 'war', 'Germany', 'France', 'The Great War'], [1914, 8, 'war', 'United Kingdom', 'Germany', 'The Great War'],
+      [1914, 11, 'war', 'Ottoman Empire', 'Russia', 'The Ottomans join the war'], [1915, 5, 'war', 'Italy', 'Austria-Hungary', 'Italy joins the Entente'],
+      [1917, 4, 'war', 'United States', 'Germany', 'America enters the war']],
+    '1939': [[1939, 3, 'annex', 'Germany', 'Czechoslovakia', 'Germany occupies Bohemia and Moravia'], [1939, 4, 'annex', 'Italy', 'Albania', 'Italy invades Albania'],
+      [1939, 8, 'pact', 'Germany', 'USSR', 'Molotov-Ribbentrop Pact'], [1939, 9, 'war', 'Germany', 'Poland', 'Fall Weiss'], [1939, 9, 'war', 'USSR', 'Poland', 'Soviet invasion of Poland'],
+      [1939, 11, 'war', 'USSR', 'Finland', 'The Winter War'], [1940, 4, 'war', 'Germany', 'Denmark', 'Operation Weserübung'], [1940, 4, 'war', 'Germany', 'Norway', 'Operation Weserübung'],
+      [1940, 5, 'war', 'Germany', 'Netherlands', 'Fall Gelb'], [1940, 5, 'war', 'Germany', 'Belgium', 'Fall Gelb'], [1940, 6, 'war', 'Italy', 'France', 'Italy joins the war'],
+      [1940, 10, 'war', 'Italy', 'Greece', 'Greco-Italian War'], [1941, 4, 'war', 'Germany', 'Yugoslavia', 'Invasion of Yugoslavia'],
+      [1941, 6, 'war', 'Germany', 'USSR', 'Operation Barbarossa'], [1941, 12, 'war', 'Japan', 'United States', 'Pearl Harbor'], [1941, 12, 'war', 'Japan', 'United Kingdom', 'Japan strikes Malaya']],
+    '2003': [[2003, 3, 'war', 'United States', 'Iraq', 'Invasion of Iraq'], [2003, 3, 'war', 'United Kingdom', 'Iraq', 'Invasion of Iraq'],
+      [2006, 7, 'war', 'Israel', 'Lebanon', 'Lebanon War'], [2008, 8, 'war', 'Russia', 'Georgia', 'Russo-Georgian War'], [2022, 2, 'war', 'Russia', 'Ukraine', 'Russian invasion of Ukraine']]
+  };
+  // Timeline entries within the next `months` months (hints for the AI game master).
+  function upcoming(g, months) {
+    const now = g.year * 12 + g.month, out = [];
+    for (const [y, m, kind, a, b, note] of TIMELINE[g.period] || []) {
+      const t = y * 12 + m;
+      if (t >= now && t <= now + months) out.push(`${MONTHS[m - 1]} ${y}: ${note} (${kind} ${a} -> ${b})`);
+    }
+    return out;
+  }
+  // Apply this month's timeline entries for AI nations (used when the AI game master is offline).
+  function applyTimeline(data, g) {
+    const now = g.year * 12 + g.month, out = [];
+    for (const [y, m, kind, an, bn, note] of TIMELINE[g.period] || []) {
+      if (y * 12 + m !== now) continue;
+      const a = findNation(g, an), b = findNation(g, bn);
+      if (a < 0 || b < 0 || a === g.player || !g.nations[a].alive || !g.nations[b].alive) continue;
+      if (kind === 'war' && !atWar(g, a, b) && !allied(g, a, b) && rel(g, a, b) < 30) { declareWar(g, a, b); out.push({ title: note, body: `${g.nations[a].name} declares war on ${g.nations[b].name}.`, nations: [an, bn] }); }
+      if (kind === 'peace' && atWar(g, a, b)) { makePeace(g, a, b); out.push({ title: note, body: `${g.nations[a].name} and ${g.nations[b].name} make peace.`, nations: [an, bn] }); }
+      if (kind === 'pact' && !atWar(g, a, b)) { setRel(g, a, b, 40); setRel(g, b, a, 40); out.push({ title: note, body: `${g.nations[a].name} and ${g.nations[b].name} sign a non-aggression pact.`, nations: [an, bn] }); }
+      if (kind === 'annex' && b !== g.player && divisions(g, b) < divisions(g, a) * 0.5) { for (let p = 0; p < g.owner.length; p++) if (g.owner[p] === b) transfer(g, data, p, a); out.push({ title: note, body: `${g.nations[b].name} is swallowed by ${g.nations[a].name}.`, nations: [an, bn] }); }
+    }
+    return out;
+  }
+
   // ------------------------------------------------------------------ turn
   // Phase 1: move everything and find battles. The UI resolves battles, then calls endTurnFinish.
   function endTurnMove(data, g) {
     for (const a of g.armies) a.moved = false;
+    g.generalNotes = runGenerals(data, g);
     aiMilitary(data, g);
     moveArmies(data, g, a => a.n === g.player);
     moveArmies(data, g, a => a.n !== g.player);
@@ -768,9 +959,10 @@
   function deserialize(s) { return JSON.parse(s); }
 
   root.World = {
-    PERIODS, MONTHS, decodeGrid, newGame, dateLabel, rel, setRel, addRel, atWar, allied, ally, unally, declareWar, makePeace, setWar,
+    PERIODS, MONTHS, newGame, dateLabel, rel, setRel, addRel, atWar, allied, ally, unally, declareWar, makePeace, setWar,
     transfer, provincesOf, income, upkeep, divisions, recruit, reachable, canEnter, moveArmies, findBattles, battleOdds, autoResolve,
     finishBattle, endTurnMove, endTurnFinish, applyChange, findNation, findProvince, neighbours, borderProvinces, sidePower,
-    serialize, deserialize, hashColor, seaTargets, isPort, checkAlive, mergeArmies, addArmy, pathTo, dist
+    serialize, deserialize, hashColor, seaTargets, isPort, km, provValue,
+    addGeneral, generalOf, assignArmy, initGenerals, runGenerals, frontWith, upcoming, applyTimeline, TIMELINE, checkAlive, mergeArmies, addArmy, pathTo, dist
   };
 })(typeof window !== 'undefined' ? window : globalThis);

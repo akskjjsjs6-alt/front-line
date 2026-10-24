@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const W = World, $ = id => document.getElementById(id);
-  const SAVE = 'frontline-world-v1', HELP = 'frontline-help-v1';
+  const SAVE = 'frontline-world-v2', HELP = 'frontline-help-v1';
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } },
@@ -12,6 +12,7 @@
   const cache = {};
   let data = null, g = null, map = null, pickMap = null, pickState = null, pickSel = -1, period = null;
   let sel = { army: null, prov: -1 }, reach = null, diploLog = [], busy = false, markers = [], aiState = 'unknown';
+  let pickGen = null, pickProv = null, frontCache = { v: -1, list: [] };
 
   async function loadData(pid) {
     if (!cache[pid]) cache[pid] = fetch(W.PERIODS[pid].file).then(r => { if (!r.ok) throw new Error('map ' + r.status); return r.json(); });
@@ -49,18 +50,7 @@
     for (let x = 0; x < cv.width; x += 40) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, cv.height); c.stroke(); }
     for (let y = 0; y < cv.height; y += 40) { c.beginPath(); c.moveTo(0, y); c.lineTo(cv.width, y); c.stroke(); }
   }
-  function drawPreview(cv, d, pid) {
-    const st = W.newGame(d, pid), grid = W.decodeGrid(d), img = new ImageData(d.w, d.h);
-    const cols = st.nations.map(n => [parseInt(n.color.slice(1, 3), 16), parseInt(n.color.slice(3, 5), 16), parseInt(n.color.slice(5, 7), 16)]);
-    for (let i = 0; i < grid.length; i++) {
-      const p = grid[i], k = i * 4;
-      if (!p) { img.data[k] = 18; img.data[k + 1] = 34; img.data[k + 2] = 52; } else { const o = st.owner[p - 1], c = o >= 0 ? cols[o] : [150, 142, 120]; img.data[k] = c[0]; img.data[k + 1] = c[1]; img.data[k + 2] = c[2]; }
-      img.data[k + 3] = 255;
-    }
-    const tmp = document.createElement('canvas'); tmp.width = d.w; tmp.height = d.h; tmp.getContext('2d').putImageData(img, 0, 0);
-    const c = cv.getContext('2d'), s = Math.max(cv.width / d.w, cv.height / d.h);
-    c.imageSmoothingEnabled = true; c.drawImage(tmp, (cv.width - d.w * s) / 2, (cv.height - d.h * s) / 2 - 10, d.w * s, d.h * s);
-  }
+  function drawPreview(cv, d, pid) { WorldMap.renderPreview(cv, d, W.newGame(d, pid)); }
   async function pingAI() {
     try {
       const res = await fetch(GM.AI_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'ping' }) });
@@ -93,12 +83,12 @@
       highlights: () => pickSel < 0 ? [] : W.provincesOf(pickState, pickSel).map(p => ({ p, fill: 'rgba(255,255,255,.35)' })),
       armies: () => [], battles: () => []
     });
-    pickMap.resize(); pickMap.paint(); pickMap.cam.z = pickMap.fitZ() * 1.3; pickMap.cam.x = data.w * 0.3; pickMap.cam.y = data.h * 0.05; pickMap.clamp();
+    pickMap.resize(); pickMap.paint(); pickMap.cam.z = pickMap.fitZ() * 2.2; pickMap.cam.x = pickMap.W * 0.42; pickMap.cam.y = pickMap.H * 0.12; pickMap.clamp();
     const q = $('pick-quick'); q.innerHTML = '';
     pickState.nations.map((n, i) => [n, i]).filter(([n]) => n.great).sort((a, b) => b[0].startDiv - a[0].startDiv).forEach(([n, i]) => {
       const c = document.createElement('button'); c.className = 'chip';
       c.innerHTML = `<i class="swatch" style="background:${n.color}"></i>${esc(n.name)}`;
-      c.onclick = () => { choosePick(i); pickMap.focus(n.cap, pickMap.fitZ() * 3); };
+      c.onclick = () => { choosePick(i); pickMap.focus(n.cap, 2.2); };
       q.appendChild(c);
     });
   }
@@ -115,9 +105,8 @@
       ${n.allies.length ? `<span>Allies</span><span>${n.allies.slice(0, 6).map(w => esc(pickState.nations[w].name)).join(', ')}${n.allies.length > 6 ? '…' : ''}</span>` : ''}</div>
       <div class="acts"><button class="btn primary" id="pick-go">Lead ${esc(n.name)}</button></div>`;
     card.hidden = false;
-    card.querySelector('.x').onclick = () => { card.hidden = true; pickSel = -1; pickMap.dirty = true; };
+    card.querySelector('.x').onclick = () => { card.hidden = true; pickSel = -1; };
     $('pick-go').onclick = () => startGame(period, n.name);
-    pickMap.dirty = true;
   }
   function pickSearch() {
     const q = $('pick-search').value.trim().toLowerCase(), box = $('pick-results');
@@ -126,7 +115,7 @@
     box.innerHTML = hits.length ? '' : '<button disabled>No match</button>';
     for (const [n, i] of hits) {
       const b = document.createElement('button'); b.innerHTML = `<i class="swatch" style="background:${n.color}"></i>${esc(n.name)}`;
-      b.onclick = () => { box.hidden = true; $('pick-search').value = ''; choosePick(i); pickMap.focus(n.cap, pickMap.fitZ() * 3); };
+      b.onclick = () => { box.hidden = true; $('pick-search').value = ''; choosePick(i); pickMap.focus(n.cap, 2.2); };
       box.appendChild(b);
     }
     box.hidden = false;
@@ -156,10 +145,10 @@
     sel = { army: null, prov: -1 }; reach = null; markers = [];
     if (map) { const old = $('map'), n = cloneCanvas(old); old.replaceWith(n); }
     map = new WorldMap($('map'), data, {
-      state: () => g, onClick, onHover, highlights, armies: armyViews, battles: () => markers
+      state: () => g, onClick, onHover, highlights, armies: armyViews, battles: () => markers, fronts
     });
     map.resize(); map.paint();
-    map.focus(g.nations[g.player].cap, map.fitZ() * 4);
+    map.focus(g.nations[g.player].cap, 2.6);
     bindGameUi();
     renderAll();
     updateBadge();
@@ -175,7 +164,7 @@
   }
   function setTab(t) {
     document.querySelectorAll('.tabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
-    for (const k of ['orders', 'diplo', 'news']) $('tab-' + k).hidden = k !== t;
+    for (const k of ['orders', 'army', 'diplo', 'news']) $('tab-' + k).hidden = k !== t;
     $('side').classList.remove('collapsed'); $('side-toggle').textContent = '▾';
     if (t === 'news') $('news-dot').hidden = true;
   }
@@ -192,7 +181,8 @@
     return g.armies.map(a => ({
       ...a, ref: a, type: armyType(g.nations[a.n]), affil: affil(a.n),
       ech: a.div >= 20 ? 'XXX' : a.div >= 5 ? 'XX' : a.div >= 1 ? 'X' : 'III',
-      selected: sel.army === a, showPath: a.n === g.player, always: a.n === g.player || W.atWar(g, a.n, g.player) || W.allied(g, a.n, g.player),
+      selected: sel.army === a || (pickGen && pickGen.armies.includes(a.id)), showPath: a.n === g.player, always: a.n === g.player || W.atWar(g, a.n, g.player) || W.allied(g, a.n, g.player),
+      genColor: a.n === g.player ? (W.generalOf(g, a) || {}).color : null,
       pathColor: a.path.length && hostileTarget(a) ? '#ff8a80' : '#ffffff'
     }));
   }
@@ -207,6 +197,7 @@
       }
       out.push({ p: sel.army.p, outline: 'rgba(255,255,255,.55)', fill: 'rgba(0,0,0,0)' });
     } else if (sel.prov >= 0) out.push({ p: sel.prov, outline: 'rgba(255,255,255,.45)', fill: 'rgba(0,0,0,0)' });
+    for (const gen of g.generals || []) if (gen.n === g.player && gen.order && gen.order.prov != null && gen.armies.length) out.push({ p: gen.order.prov, outline: gen.color });
     return out;
   }
   function onHover(p, pt, view) {
@@ -225,8 +216,21 @@
   function onClick(p, ev) {
     if (busy) return;
     $('tooltip').hidden = true;
-    if (ev.right) { clearSel(); return; }
+    if (ev.right) { clearSel(); endPicking(); return; }
     const view = ev.army, army = view && view.ref;
+    if (pickGen) {
+      if (army && army.n === g.player) {
+        const has = pickGen.armies.includes(army.id);
+        W.assignArmy(g, has ? null : pickGen, army);
+        toast(has ? 'Army returned to your direct command.' : `Army placed under ${pickGen.name}.`, 'good', 1800);
+        renderArmy();
+      }
+      return;
+    }
+    if (pickProv) {
+      if (p >= 0) { const f = pickProv; endPicking(); f(p); }
+      return;
+    }
     if (army && army.n === g.player && sel.army !== army) { selectArmy(army); return; }
     if (sel.army) {
       const a = sel.army;
@@ -235,6 +239,8 @@
       const path = reach.get(p);
       if (path) {
         a.path = path.slice();
+        const gen = W.generalOf(g, a);
+        if (gen) { a.manual = true; toast(`This month the army follows your order instead of ${gen.name}'s.`, 'info', 2500); }
         const c = g.ctrl[p], enemy = (c >= 0 && W.atWar(g, g.player, c)) || g.armies.some(e => e.p === p && W.atWar(g, g.player, e.n));
         toast(path.sea ? `Shipping troops to ${data.provinces[p].n}. They land next turn.` : enemy ? `Attack ordered on ${data.provinces[p].n}.` : `Marching to ${data.provinces[p].n}.`, enemy ? 'bad' : 'good', 2500);
         clearSel(); renderOrders(); return;
@@ -242,7 +248,7 @@
       const o = g.ctrl[p];
       if (o >= 0 && o !== g.player && !W.atWar(g, g.player, o) && !W.allied(g, g.player, o)) { toast(`You are not at war with ${g.nations[o].name}. Declare war in Diplomacy first.`, 'bad'); return; }
       const lp = W.pathTo(data, g, g.player, a.p, q => q === p, 60);
-      if (lp) { a.path = lp; toast(`Marching to ${data.provinces[p].n}. It will take about ${Math.ceil(lp.length / W.PERIODS[g.period].speed)} months.`, 'good'); clearSel(); renderOrders(); return; }
+      if (lp) { a.path = lp; toast(`Marching to ${data.provinces[p].n}. It will take about ${Math.max(1, Math.ceil(lp.reduce((t, q, k) => t + W.km(data, k ? lp[k - 1] : a.p, q), 0) / W.PERIODS[g.period].km))} month(s).`, 'good'); clearSel(); renderOrders(); return; }
       toast('Your army cannot reach that province from here. Move it to one of your ports to ship it overseas.', 'bad'); return;
     }
     if (army) { selectProvince(army.p); return; }
@@ -287,7 +293,7 @@
   function clearSel() { sel = { army: null, prov: -1 }; reach = null; $('sel-card').hidden = true; }
 
   // ================================================================ panels
-  function renderAll() { renderHud(); renderOrders(); renderDiplo(); renderNews(); $('end-date').textContent = W.dateLabel(g); }
+  function renderAll() { renderHud(); renderOrders(); renderArmy(); renderDiplo(); renderNews(); $('end-date').textContent = W.dateLabel(g); }
   function renderHud() {
     const n = g.nations[g.player];
     $('hud-color').style.background = n.color; $('hud-name').textContent = n.name;
@@ -316,7 +322,7 @@
       <p class="help">New divisions appear in your capital. Each costs ${cost}, plus a little upkeep every month.</p>
       <div class="recruit"><button class="btn small" id="r1" ${n.money < cost ? 'disabled' : ''}>+1 division</button><button class="btn small" id="r5" ${n.money < cost * 5 ? 'disabled' : ''}>+5 divisions</button><span class="cost">Treasury: ${Math.floor(n.money)}</span></div>
       <h4>Military</h4>
-      <p class="help">Tap one of your armies (blue NATO symbol) on the map, then tap where it should go. Armies move ${W.PERIODS[g.period].speed} provinces a month.</p>
+      <p class="help">Tap one of your armies (blue NATO symbol) on the map, then tap where it should go. Armies march about ${W.PERIODS[g.period].km} km a month. Or hand them to a general in the <b>Army</b> tab.</p>
       <div id="queue"></div>`;
     $('orders-text').oninput = e => { g.orders = e.target.value; };
     t.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { const ta = $('orders-text'); ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + b.dataset.s + '.'; g.orders = ta.value; });
@@ -339,7 +345,9 @@
     const list = g.nations.map((n, i) => i).filter(i => i !== me && g.nations[i].alive && (!q || g.nations[i].name.toLowerCase().includes(q)))
       .sort((a, b) => rank(a) - rank(b) || W.divisions(g, b) - W.divisions(g, a));
     const groups = ['At war', 'Allies', 'Neighbours', 'Great powers', 'Others'];
-    let html = `<input class="diplo-search" placeholder="Search nations…" value="${esc(q)}">`, cur = -1;
+    const unread = (g.inbox || []).filter(m => !m.read);
+    let html = unread.map((m, k) => `<div class="inbox"><b>${esc(g.nations[m.from].name)} writes (${esc(m.date)})</b><p>${esc(m.text)}</p><div class="acts"><button class="btn small primary" data-in="${g.inbox.indexOf(m)}">Reply</button><button class="btn small" data-dis="${g.inbox.indexOf(m)}">Dismiss</button></div></div>`).join('')
+      + `<input class="diplo-search" placeholder="Search nations…" value="${esc(q)}">`, cur = -1;
     for (const i of list) {
       const r = rank(i);
       if (r !== cur) { html += `<h4>${groups[r]}</h4>`; cur = r; }
@@ -350,11 +358,113 @@
     const inp = t.querySelector('.diplo-search');
     inp.oninput = () => { renderDiplo(); const i2 = $('tab-diplo').querySelector('.diplo-search'); i2.focus(); i2.setSelectionRange(i2.value.length, i2.value.length); };
     t.querySelectorAll('[data-n]').forEach(b => b.onclick = () => showNation(+b.dataset.n));
+    t.querySelectorAll('[data-in]').forEach(b => b.onclick = () => replyTo(g.inbox[+b.dataset.in].from));
+    t.querySelectorAll('[data-dis]').forEach(b => b.onclick = () => { g.inbox[+b.dataset.dis].read = true; renderDiplo(); saveGame(); });
   }
   function renderNews() {
     const t = $('tab-news');
     if (!g.news.length) { t.innerHTML = '<p class="help">News from around the world appears here after each turn.</p>'; return; }
     t.innerHTML = g.news.slice().reverse().map(n => `<div class="newsitem"><div class="d">${esc(n.date)}</div><b>${esc(n.headline)}</b><p>${esc(n.summary)}</p>${(n.events || []).map(e => `<p><b style="font-size:13.5px;display:inline">${esc(e.title)}.</b> ${esc(e.body)}</p>`).join('')}</div>`).join('');
+  }
+
+  // ================================================================ generals
+  function fronts() {
+    if (!g || !map) return [];
+    const key = map.version + ':' + JSON.stringify((g.generals || []).map(x => [x.order, x.armies.length]));
+    if (frontCache.v === key) return frontCache.list;
+    const list = [];
+    for (const gen of g.generals || []) {
+      if (gen.n !== g.player || !gen.armies.length) continue;
+      const o = gen.order || {};
+      if ((o.kind === 'front' || o.kind === 'attack') && o.target != null && g.nations[o.target].alive) {
+        const path = map.borderPath(g.player, o.target);
+        if (!path) continue;
+        const f = { path, color: gen.color, dash: o.kind === 'front' };
+        if (o.kind === 'attack') {
+          const mine = g.armies.filter(a => gen.armies.includes(a.id));
+          const geo = map.geo, cx = mine.reduce((t, a) => t + geo.provs[a.p].lx, 0) / mine.length, cy = mine.reduce((t, a) => t + geo.provs[a.p].ly, 0) / mine.length;
+          let best = null, bd = Infinity;
+          g.ctrl.forEach((c, i) => { if (c === o.target) { const d = (geo.provs[i].lx - cx) ** 2 + (geo.provs[i].ly - cy) ** 2; if (d < bd) { bd = d; best = i; } } });
+          if (best != null) { const t = geo.provs[best]; f.arrow = [[cx + (t.lx - cx) * 0.35, cy + (t.ly - cy) * 0.35], [t.lx + (t.lx - cx) * 0.15, t.ly + (t.ly - cy) * 0.15]]; }
+        }
+        list.push(f);
+      }
+    }
+    frontCache = { v: key, list };
+    return list;
+  }
+  function orderText(gen) {
+    const o = gen.order || { kind: 'hold' }, tn = o.target != null ? g.nations[o.target].name : '', pn = o.prov != null ? data.provinces[o.prov].n : '';
+    return { hold: 'Holding position', front: `Holding the border with ${tn}`, attack: `Attacking ${tn}`, seize: `Taking ${pn}`, defend: `Defending ${pn}` }[o.kind] || 'Holding position';
+  }
+  function renderArmy() {
+    const t = $('tab-army'); if (!t) return;
+    const gens = (g.generals || []).filter(x => x.n === g.player);
+    const free = g.armies.filter(a => a.n === g.player && !W.generalOf(g, a));
+    t.innerHTML = `<p class="help">Generals command groups of armies on their own. Give each one an order and they move their troops every turn, like in Hearts of Iron.</p>
+      ${gens.map(gen => {
+        const arms = g.armies.filter(a => gen.armies.includes(a.id)), div = arms.reduce((s2, a) => s2 + a.div, 0);
+        return `<div class="gen" style="border-left-color:${gen.color}">
+          <div class="gen-top"><b>${esc(gen.name)}</b><span>${arms.length} arm${arms.length === 1 ? 'y' : 'ies'} · ${div.toFixed(0)} div</span></div>
+          <div class="gen-order">${esc(orderText(gen))}</div>
+          <div class="acts"><button class="btn small primary" data-g="${gen.id}" data-a="order">Give order</button><button class="btn small" data-g="${gen.id}" data-a="assign">Choose armies</button>${arms.length ? `<button class="btn small" data-g="${gen.id}" data-a="find">Show</button>` : ''}</div>
+        </div>`;
+      }).join('')}
+      <div class="acts" style="margin-top:8px"><button class="btn small" id="gen-new">+ New general</button></div>
+      <h4>Under your direct command</h4>
+      <p class="help">${free.length ? `${free.length} arm${free.length === 1 ? 'y' : 'ies'} (${free.reduce((s2, a) => s2 + a.div, 0).toFixed(0)} divisions) take orders only from you.` : 'Every army is under a general.'}</p>`;
+    t.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
+      const gen = g.generals.find(x => x.id === +b.dataset.g);
+      if (b.dataset.a === 'order') generalOrderSheet(gen);
+      if (b.dataset.a === 'assign') startAssign(gen);
+      if (b.dataset.a === 'find') { const a = g.armies.find(x => gen.armies.includes(x.id)); if (a) map.focus(a.p, Math.max(map.cam.z, 2.6)); }
+    });
+    $('gen-new').onclick = () => { const gen = W.addGeneral(g, g.player); renderArmy(); startAssign(gen); };
+  }
+  function startAssign(gen) {
+    clearSel(); pickGen = gen; pickProv = null;
+    showHint(`Tap your armies to put them under <b>${esc(gen.name)}</b> (tap again to take one away).`, () => endPicking());
+  }
+  function endPicking() {
+    if (!pickGen && !pickProv) return;
+    pickGen = null; pickProv = null; $('mode-hint').hidden = true; renderArmy(); saveGame();
+  }
+  function showHint(html, onDone) {
+    const h = $('mode-hint'); h.innerHTML = html + ' <button>Done</button>'; h.hidden = false;
+    h.querySelector('button').onclick = onDone;
+  }
+  function generalOrderSheet(gen) {
+    const me = g.player, n = g.nations[me];
+    const neighbours = new Set();
+    W.provincesOf(g, me).forEach(p => data.provinces[p].nb.forEach(x => { const o = g.ctrl[x]; if (o >= 0 && o !== me) neighbours.add(o); }));
+    const targets = [...new Set([...n.wars, ...neighbours])].filter(i => g.nations[i].alive)
+      .sort((a, b) => (W.atWar(g, me, b) - W.atWar(g, me, a)) || g.nations[a].name.localeCompare(g.nations[b].name));
+    const opt = i => `<option value="${i}">${esc(g.nations[i].name)}${W.atWar(g, me, i) ? ' (at war)' : ''}</option>`;
+    sheet(`<h2>Orders for ${esc(gen.name)}</h2>
+      <p>Pick what this general should do with his armies. He re-plans every turn on his own.</p>
+      <h3>Hold a front</h3><p>Spread out along the border with a nation and stop them getting through.</p>
+      <div class="row-sel"><select id="o-front">${targets.map(opt).join('')}</select><button class="btn small primary" id="o-front-go">Hold border</button></div>
+      <h3>Attack a nation</h3><p>Push into their land, picking fights he can win. Needs a war.</p>
+      <div class="row-sel"><select id="o-attack">${targets.map(opt).join('')}</select><button class="btn small danger" id="o-attack-go">Attack</button></div>
+      <h3>A single place</h3>
+      <div class="acts"><button class="btn small" id="o-seize">Take a province…</button><button class="btn small" id="o-defend">Defend a province…</button><button class="btn small" id="o-hold">Stand still</button></div>
+      <div class="acts"><button class="btn ghost" id="o-x">Cancel</button></div>`);
+    const set = (o, msg) => { gen.order = o; closeSheet(); renderArmy(); toast(`${gen.name}: ${msg}`, 'good', 3000); saveGame(); };
+    if (!targets.length) { $('o-front-go').disabled = true; $('o-attack-go').disabled = true; }
+    $('o-front-go').onclick = () => { const t = +$('o-front').value; set({ kind: 'front', target: t }, `holding the border with ${g.nations[t].name}.`); };
+    $('o-attack-go').onclick = () => {
+      const t = +$('o-attack').value;
+      set({ kind: 'attack', target: t }, W.atWar(g, me, t) ? `attacking ${g.nations[t].name}.` : `we are not at war with ${g.nations[t].name}, so he will hold the border until war comes.`);
+    };
+    $('o-hold').onclick = () => set({ kind: 'hold' }, 'standing still.');
+    const pick = (kind, verb) => () => {
+      closeSheet(); clearSel(); pickGen = null;
+      pickProv = p => set({ kind, prov: p }, `${verb} ${data.provinces[p].n}.`);
+      showHint(`Tap the province ${esc(gen.name)} should ${kind === 'seize' ? 'take' : 'defend'}.`, () => endPicking());
+    };
+    $('o-seize').onclick = pick('seize', 'moving to take');
+    $('o-defend').onclick = pick('defend', 'defending');
+    $('o-x').onclick = closeSheet;
   }
 
   // ================================================================ diplomacy actions
@@ -382,7 +492,7 @@
       if (a === 'ally') openChat(i, 'Our nations would be stronger together. We propose a formal alliance.');
       if (a === 'unally') { W.unally(g, me, i); W.addRel(g, i, me, -25); diploLog.push(`Broke the alliance with ${n.name}`); closeSheet(); renderAll(); toast(`Alliance with ${n.name} ended.`, 'info'); }
       if (a === 'war') confirmWar(i);
-      if (a === 'find') { closeSheet(); map.focus(n.cap, map.fitZ() * 4); }
+      if (a === 'find') { closeSheet(); map.focus(n.cap, 2.6); }
       if (a === 'close') closeSheet();
     });
   }
@@ -396,12 +506,17 @@
     $('w-yes').onclick = () => {
       const pairs = W.declareWar(g, g.player, i);
       diploLog.push(`Declared war on ${n.name}${pairs.length > 1 ? ` (and their allies ${pairs.slice(1).map(p => g.nations[p[1]].name).join(', ')})` : ''}`);
-      closeSheet(); renderAll(); map.dirty = true; saveGame();
+      closeSheet(); renderAll(); map.paint(); saveGame();
       toast(`War declared on ${n.name}!`, 'bad', 4000);
       if (sel.army) reach = W.reachable(data, g, sel.army);
     };
   }
 
+  function replyTo(i) {
+    const hist = (g.chats[i] = g.chats[i] || []);
+    for (const m of g.inbox) if (m.from === i && !m.read) { hist.push({ role: 'leader', text: m.text }); m.read = true; }
+    renderDiplo(); openChat(i);
+  }
   // ================================================================ chat
   async function openChat(i, prefill) {
     const n = g.nations[i], hist = (g.chats[i] = g.chats[i] || []);
@@ -455,7 +570,6 @@
       sheet(waiting('Armies on the move', 'Every nation moves its troops…'));
       await sleep(250);
       const battles = W.endTurnMove(data, g);
-      map.dirty = true;
       const results = [];
       let autoAll = false;
       for (const b of battles) {
@@ -465,7 +579,7 @@
         const mine = b.attackers.concat(b.defenders).some(a => a.n === g.player);
         let r = null;
         if (mine && !autoAll) {
-          map.focus(b.p, Math.max(map.cam.z, map.fitZ() * 4)); markers = [b];
+          map.focus(b.p, Math.max(map.cam.z, 3)); markers = [b];
           const choice = await battleChoice(b, battles.filter(x => x !== b && x.attackers.concat(x.defenders).some(a => a.n === g.player)).length);
           if (choice === 'all') autoAll = true;
           if (choice === 'command' && window.Battle) {
@@ -485,6 +599,7 @@
       const facts = [];
       for (const o of fin.occ) if (o.by === g.player || o.from === g.player) facts.push(`${g.nations[o.by].name} occupies ${data.provinces[o.p].n}.`);
       for (const c of fin.caps) facts.push(`${g.nations[c].name} capitulates${(fin.caps.annexed || []).includes(c) ? ' and is annexed' : ''}.`);
+      facts.push(...(g.generalNotes || []));
       sheet(waiting('The world reacts', aiState === 'off' ? 'Simple rules are running the other nations.' : 'Every capital is deciding what to do. This can take up to a minute.'));
       const { online, res, error } = await GM.runTurn(data, g, { orders, diplomacy: diplo, battles: battleText.concat(facts) });
       aiState = online ? 'on' : 'off'; updateBadge();
@@ -496,6 +611,7 @@
       g.news.push(entry); if (g.news.length > 40) g.news.shift();
       g.orders = ''; diploLog = [];
       renderAll(); $('news-dot').hidden = false;
+      if ((res.messages_to_player || []).length) toast(`${res.messages_to_player.length} message${res.messages_to_player.length > 1 ? 's' : ''} from foreign leaders. See Diplomacy.`, 'info', 5000);
       saveGame();
       if (!g.nations[g.player].alive) return gameOver();
       await report(month, res, results, facts, notes, online, error);
@@ -542,9 +658,11 @@
         <div class="cols">${(res.events || []).map(e => `<div class="ev"><b>${esc(e.title)}</b><p>${esc(e.body)}</p></div>`).join('')}</div>
         ${(res.player_results || []).length ? `<h3>Your orders</h3>${res.player_results.map(r => `<p class="res ${r.success ? 'ok' : 'no'}"><i>${r.success ? '✔' : '✘'} ${esc(r.order)}</i><br>${esc(r.outcome)}</p>`).join('')}` : ''}
         ${mine.length || facts.length || notes.length ? `<h3>Dispatches</h3><ul class="facts">${mine.concat(facts, notes).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+        ${(res.messages_to_player || []).length ? `<h3>Messages for you</h3>${res.messages_to_player.map((m, k) => `<p class="res"><i>${esc(m.from)}:</i> ${esc(m.text)} <button class="btn small primary" data-reply="${esc(m.from)}">Reply</button></p>`).join('')}` : ''}
         ${online ? '' : `<p class="offline">The AI game master could not be reached${error ? ` (${esc(error)})` : ''}. Simple built-in rules ran this month.</p>`}
         <div class="acts"><button class="btn primary" id="rp-ok">Continue to ${esc(W.dateLabel(g))}</button></div>`, 'paper');
       $('rp-ok').onclick = () => { closeSheet(); resolve(); };
+      $('sheet').querySelectorAll('[data-reply]').forEach(b => b.onclick = () => { const i = W.findNation(g, b.dataset.reply); resolve(); if (i >= 0) replyTo(i); });
     });
   }
   function gameOver() {

@@ -246,3 +246,17 @@ textarea.orders:focus { outline: none; border-color: var(--blue); }
   .versus { grid-template-columns: 1fr; }
   .versus .vs { text-align: center; }
 }
+
+/* generals */
+.gen { border: 1px solid var(--line); border-left: 4px solid var(--gold); border-radius: 8px; padding: 10px; margin-bottom: 8px; background: rgba(255,255,255,.02); }
+.gen-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.gen-top b { font-family: var(--head); font-size: 18px; letter-spacing: .02em; }
+.gen-top span { color: var(--dim); font-size: 12px; white-space: nowrap; }
+.gen-order { font-size: 12.5px; margin: 4px 0 8px; color: #c9d6e2; }
+.gen .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.row-sel { display: flex; gap: 8px; }
+.row-sel select { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--line2); border-radius: 6px; padding: 7px; font: inherit; font-size: 13px; }
+.inbox { border: 1px solid var(--gold); border-radius: 8px; padding: 10px; margin-bottom: 10px; background: rgba(242,201,76,.06); }
+.inbox b { font-family: var(--head); font-size: 16px; color: var(--gold); }
+.inbox p { font-family: var(--serif); font-size: 14px; line-height: 1.45; margin: 4px 0 8px; }
+.tabs button { font-size: 15px; padding: 10px 4px; }

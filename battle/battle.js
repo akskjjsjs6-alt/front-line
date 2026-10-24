@@ -22,7 +22,7 @@
 
   // ================================================================ battlefield generation
   function biomeAt(data, p) {
-    const pr = data.provinces[p], lat = data.lat0 - (pr.y + 0.5) * data.res, lon = (pr.x + 0.5) * data.res - 180;
+    const pr = data.provinces[p], lat = pr.y, lon = pr.x;
     if ((lat > 12 && lat < 35 && lon > -18 && lon < 62) || (lat > 15 && lat < 33 && lon > -117 && lon < -100) || (lat > -32 && lat < -18 && lon > 115 && lon < 145) || (lat > 36 && lat < 48 && lon > 52 && lon < 105)) return 'desert';
     if (Math.abs(lat) < 12 && ((lon > -82 && lon < -35) || (lon > 8 && lon < 32) || (lon > 95 && lon < 155))) return 'jungle';
     if (lat > 56) return 'taiga';

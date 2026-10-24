@@ -7,8 +7,14 @@ month by month while an AI game master (Claude) runs every other country.
   what happens and writes a newspaper report each month.
 - **Talk to any leader.** Open a diplomatic channel and negotiate in your own words: alliances, peace, land, trade.
   When a leader agrees to a deal, you can sign it.
+- **A real world map.** About 2,300 real provinces (states, oblasts, governorates) over shaded terrain, with the
+  borders of the chosen year. Zoom out to see the world, zoom in and the map and units grow, like Hearts of Iron.
 - **Move armies on the world map.** Armies are drawn with NATO map symbols: blue for you and your allies, red for
   enemies, green for neutrals. Ship troops overseas from your ports.
+- **Generals.** Put armies under a general and order him to hold a border, attack a nation, or take or defend a
+  province. He re-plans and moves his troops every turn.
+- **A living world.** Other nations follow their own ambitions and the real historical timeline by default
+  (Fall Weiss, Barbarossa, the Iraq War...), declare wars on their own and send you demands and offers.
 - **Fight battles yourself or auto-resolve them.** Choose *Command the battle* to zoom down to a real-time
   battlefield and control every unit: draw front lines, call air strikes, take the objective.
 

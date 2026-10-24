@@ -23,7 +23,7 @@ const CHANGE_KINDS = [
 const TURN_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["headline", "summary", "events", "player_results", "changes"],
+  required: ["headline", "summary", "events", "player_results", "changes", "messages_to_player"],
   properties: {
     headline: { type: "string" },
     summary: { type: "string" },
@@ -39,6 +39,13 @@ const TURN_SCHEMA = {
       items: {
         type: "object", additionalProperties: false, required: ["order", "outcome", "success"],
         properties: { order: { type: "string" }, outcome: { type: "string" }, success: { type: "boolean" } },
+      },
+    },
+    messages_to_player: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false, required: ["from", "text"],
+        properties: { from: { type: "string" }, text: { type: "string" } },
       },
     },
     changes: {
@@ -91,6 +98,9 @@ Each request gives you the date, the world state, the player's free-text orders 
   relation: a's opinion of b changes by value (-40..40). stat: nation a's text ("economy", "military" or "stability") changes by value (-15..15).
   leader / government / rename: nation a gets text as its new leader, government or name. independence: a new nation named a breaks away from b taking provinces.
   recruit: nation a raises value new divisions (1-20).
+- Every other nation is alive and ambitious. Each month, decide what the important nations want and let them act on it, whether or not the player did anything: declare wars, sign alliances and pacts, issue ultimatums, annex weak neighbours, fall into revolution, change leaders, make peace when a war goes badly. Do not wait for the player to start things.
+- You are given the real historical timeline for the coming months. Use it as the default course of history: when its conditions still hold, let those events happen around their dates (for example by emitting declare_war). If the world has changed (because of the player or earlier events), adapt or drop them and invent plausible alternatives.
+- Leaders may write to the player directly in messages_to_player: demands, ultimatums, offers, threats, proposals, congratulations or warnings, in their own voice. Use it when a nation has a real reason to contact the player; 0-3 messages a month.
 - Keep it historically grounded for the era but let history diverge. AI nations act in their own interest: they react to threats, form coalitions against aggressors, and take opportunities.
 - Keep text vivid but brief. Never address the player as "you" in events; refer to their nation by name.`;
 
@@ -135,7 +145,15 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Bad JSON" }, 400);
   }
   const ready = !!Deno.env.get("ANTHROPIC_API_KEY");
-  if (body.mode === "ping") return json({ ok: ready, model: MODEL });
+  if (body.mode === "ping") {
+    if (!ready) return json({ ok: false, reason: "missing key", model: MODEL });
+    try {
+      await client.models.retrieve(MODEL);          // free call that checks the key works
+      return json({ ok: true, model: MODEL });
+    } catch (e) {
+      return json({ ok: false, reason: e instanceof Anthropic.AuthenticationError ? "invalid key" : String(e), model: MODEL });
+    }
+  }
   if (!ready) return json({ error: "The AI is not set up yet (missing ANTHROPIC_API_KEY)." }, 503);
   try {
     if (body.mode === "turn") {
@@ -147,6 +165,7 @@ Deno.serve(async (req: Request) => {
         `Battles and military events this turn:\n${clip(JSON.stringify(body.battles ?? []), 6000)}`,
         `World:\n${clip(JSON.stringify(body.world), 70_000)}`,
         `Recent history:\n${clip(JSON.stringify(body.history ?? []), 8000)}`,
+        `Real historical timeline for the next months (the default course of events):\n${clip(JSON.stringify(body.timeline ?? []), 3000)}`,
       ].join("\n\n");
       return json(await ask(TURN_SYSTEM, user, TURN_SCHEMA, "medium"));
     }
