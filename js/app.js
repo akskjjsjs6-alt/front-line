@@ -151,7 +151,7 @@
     show('game');
     sel = { armies: [], prov: -1 }; battleNotes = new Map(); setSpeed(0); acc = 0;
     W.drainEvents(); W.drainChanged();
-    if (map) { const old = $('map'), n = cloneCanvas(old); old.replaceWith(n); }
+    if (map) { map.dispose && map.dispose(); const old = $('map'), n = cloneCanvas(old); old.replaceWith(n); }
     map = new WorldMap($('map'), data, {
       state: () => g, onClick, onHover, highlights, armies: armyViews, battles: battleViews, fronts
     });
@@ -186,7 +186,9 @@
   }
   function affil(n) { return n === g.player || W.allied(g, n, g.player) ? 'friend' : W.atWar(g, n, g.player) ? 'hostile' : 'neutral'; }
   function armyViews() {
-    return g.armies.map(a => ({
+    // draw only your own armies and the armies of nations at war with you: every other
+    // nation's units are skipped entirely, which keeps the map cheap on busy worlds
+    return g.armies.filter(a => a.n === g.player || W.atWar(g, a.n, g.player)).map(a => ({
       ...a, ref: a, type: armyType(g.nations[a.n]), affil: affil(a.n),
       ech: a.div >= 20 ? 'XXX' : a.div >= 5 ? 'XX' : a.div >= 1 ? 'X' : 'III',
       selected: sel.armies.includes(a) || (pickGen && pickGen.armies.includes(a.id)), showPath: a.n === g.player,
