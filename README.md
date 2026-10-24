@@ -30,8 +30,10 @@ then open http://localhost:8000. For free hosting, turn on GitHub Pages (Setting
 
 ## The AI game master
 
-`supabase/functions/ai/index.ts` is a Supabase Edge Function that calls the Claude API. It needs the secret
-`ANTHROPIC_API_KEY` set in the Supabase project (Edge Functions → Secrets). Optionally set `CLAUDE_MODEL` to use a
+`supabase/functions/ai/index.ts` is a Supabase Edge Function that calls Claude, either through
+Vercel AI Gateway or the Claude API directly. It needs one secret in the Supabase project (Edge Functions → Secrets):
+`AI_GATEWAY_API_KEY` for a Vercel AI Gateway key, or `ANTHROPIC_API_KEY` for a Claude API key (a Vercel key stored
+under that name is detected too). Optionally set `CLAUDE_MODEL` to use a
 different model. When the server can't be reached, the game keeps working with simple built-in rules.
 
 ## Files

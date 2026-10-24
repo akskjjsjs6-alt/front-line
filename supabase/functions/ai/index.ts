@@ -1,11 +1,15 @@
 // Front Line AI game master. Runs as a Supabase Edge Function.
-// Needs the secret ANTHROPIC_API_KEY (Supabase dashboard -> Edge Functions -> Secrets).
+// Needs one secret (Supabase dashboard -> Edge Functions -> Secrets):
+//   AI_GATEWAY_API_KEY  a Vercel AI Gateway key, or
+//   ANTHROPIC_API_KEY   a Claude API key (a Vercel key stored here is detected and works too).
 // Optional: CLAUDE_MODEL to use a different model.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import Anthropic from "npm:@anthropic-ai/sdk";
 
-const MODEL = Deno.env.get("CLAUDE_MODEL") || "claude-opus-5-5";
-const client = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+const KEY = Deno.env.get("AI_GATEWAY_API_KEY") || Deno.env.get("ANTHROPIC_API_KEY") || "";
+const VIA_VERCEL = !!Deno.env.get("AI_GATEWAY_API_KEY") || (KEY !== "" && !KEY.startsWith("sk-ant-"));
+const MODEL = Deno.env.get("CLAUDE_MODEL") || (VIA_VERCEL ? "anthropic/claude-opus-5.5" : "claude-opus-5-5");
+const client = new Anthropic({ apiKey: KEY, ...(VIA_VERCEL ? { baseURL: "https://ai-gateway.vercel.sh" } : {}) });
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -114,23 +118,52 @@ const CHAT_SYSTEM = `You are role-playing the head of state or government of a n
 
 const clip = (s: unknown, n: number) => String(s ?? "").slice(0, n);
 
-async function ask(system: string, user: string, schema: object, effort: "low" | "medium") {
-  const res = await client.beta.messages.create({
-    model: MODEL,
-    max_tokens: 16000,
-    betas: ["server-side-fallback-2026-07-01"],
-    // deno-lint-ignore no-explicit-any
-    fallbacks: "default" as any,
-    system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-    messages: [{ role: "user", content: user }],
-    output_config: { effort, format: { type: "json_schema", schema } },
-  // deno-lint-ignore no-explicit-any
-  } as any);
+// deno-lint-ignore no-explicit-any
+function readText(res: any) {
   if (res.stop_reason === "refusal") throw new Error("The AI declined this request.");
   if (res.stop_reason === "max_tokens") throw new Error("The AI ran out of space for its answer.");
   // deno-lint-ignore no-explicit-any
-  const text = (res.content as any[]).filter((b) => b.type === "text").map((b) => b.text).join("");
-  return JSON.parse(text);
+  return (res.content as any[]).filter((b) => b.type === "text").map((b) => b.text).join("");
+}
+function parseJson(text: string) {
+  try { return JSON.parse(text); } catch { /* fall through */ }
+  const a = text.indexOf("{"), b = text.lastIndexOf("}");
+  if (a >= 0 && b > a) return JSON.parse(text.slice(a, b + 1));
+  throw new Error("The AI's answer was not valid JSON.");
+}
+
+async function ask(system: string, user: string, schema: object, effort: "low" | "medium") {
+  const sys = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
+  const msgs = [{ role: "user", content: user }];
+  if (!VIA_VERCEL) {
+    const res = await client.beta.messages.create({
+      model: MODEL, max_tokens: 16000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      system: sys, messages: msgs,
+      output_config: { effort, format: { type: "json_schema", schema } },
+    // deno-lint-ignore no-explicit-any
+    } as any);
+    return parseJson(readText(res));
+  }
+  // Through Vercel AI Gateway: try structured output first, then plain JSON instructions if the gateway rejects it.
+  try {
+    const res = await client.messages.create({
+      model: MODEL, max_tokens: 16000, system: sys, messages: msgs,
+      output_config: { effort, format: { type: "json_schema", schema } },
+    // deno-lint-ignore no-explicit-any
+    } as any);
+    return parseJson(readText(res));
+  } catch (e) {
+    if (!(e instanceof Anthropic.BadRequestError)) throw e;
+    const res = await client.messages.create({
+      model: MODEL, max_tokens: 16000,
+      system: [{ type: "text", text: system + "\n\nReply with only one JSON object, no other text, that matches this JSON schema:\n" + JSON.stringify(schema) }],
+      messages: msgs,
+    // deno-lint-ignore no-explicit-any
+    } as any);
+    return parseJson(readText(res));
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -144,17 +177,21 @@ Deno.serve(async (req: Request) => {
   } catch {
     return json({ error: "Bad JSON" }, 400);
   }
-  const ready = !!Deno.env.get("ANTHROPIC_API_KEY");
+  const ready = KEY !== "";
   if (body.mode === "ping") {
     if (!ready) return json({ ok: false, reason: "missing key", model: MODEL });
     try {
-      await client.models.retrieve(MODEL);          // free call that checks the key works
-      return json({ ok: true, model: MODEL });
+      // check the key works: free on the Claude API, a one-token reply through Vercel
+      if (VIA_VERCEL) await client.messages.create({ model: MODEL, max_tokens: 1, messages: [{ role: "user", content: "ok" }] });
+      else await client.models.retrieve(MODEL);
+      return json({ ok: true, model: MODEL, via: VIA_VERCEL ? "vercel" : "anthropic" });
     } catch (e) {
-      return json({ ok: false, reason: e instanceof Anthropic.AuthenticationError ? "invalid key" : String(e), model: MODEL });
+      if (e instanceof Anthropic.AuthenticationError) return json({ ok: false, reason: "invalid key", model: MODEL });
+      if (String(e).includes("customer_verification_required")) return json({ ok: false, reason: "Vercel needs a credit card on file before AI Gateway works", model: MODEL });
+      return json({ ok: false, reason: String(e), model: MODEL });
     }
   }
-  if (!ready) return json({ error: "The AI is not set up yet (missing ANTHROPIC_API_KEY)." }, 503);
+  if (!ready) return json({ error: "The AI is not set up yet (missing AI_GATEWAY_API_KEY or ANTHROPIC_API_KEY)." }, 503);
   try {
     if (body.mode === "turn") {
       const user = [
@@ -185,6 +222,7 @@ Deno.serve(async (req: Request) => {
   } catch (e) {
     if (e instanceof Anthropic.RateLimitError) return json({ error: "The AI is busy. Try again in a minute." }, 429);
     if (e instanceof Anthropic.AuthenticationError) return json({ error: "The AI key is invalid." }, 503);
+    if (String(e).includes("customer_verification_required")) return json({ error: "Vercel AI Gateway needs a credit card on the account before it will answer." }, 503);
     if (e instanceof Anthropic.APIError) return json({ error: `AI error ${e.status}: ${e.message}` }, 502);
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
