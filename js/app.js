@@ -625,7 +625,8 @@
     const ch = W.drainChanged();
     if (ch.all) map.paint(); else if (ch.provs.length) map.invalidate([...new Set(ch.provs)]);
     for (const ev of W.drainEvents()) onEvent(ev);
-    if (now - (afterTick.ui || 0) > 500) {
+    const busyHands = map && map.interacting && now - (map.lastInput || 0) < 200;
+    if (!busyHands && now - (afterTick.ui || 0) > 500) {
       afterTick.ui = now;
       renderHud(); renderBattles();
       if (sel.armies.length && !$('sel-card').hidden) armyCard();
@@ -677,7 +678,9 @@
       if (!online) { console.warn('AI offline:', error); pingTimer = setTimeout(pingAI, 20000); }
       GM.applyTurn(data, g, res);
       W.checkAlive(g);
-      map.paint();
+      const ch = W.drainChanged();                 // only these provinces changed hands
+      if (ch.all) map.paint(); else if (ch.provs.length) map.invalidate([...new Set(ch.provs)]);
+      map.labelsDirty = true;                      // names and alliances may have changed
       const entry = { date: label, headline: res.headline, summary: res.summary, events: res.events || [], res, facts, online, error };
       g.news.push(entry); if (g.news.length > 40) g.news.shift();
       renderAll(); $('news-dot').hidden = false;

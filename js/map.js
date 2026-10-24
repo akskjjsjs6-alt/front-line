@@ -348,7 +348,7 @@ onmessage = (e) => {
       this.cv.width = Math.round(r.width * dpr); this.cv.height = Math.round(r.height * dpr);
       this.anim = null; this.wheel = null;
       // tile cache bound: enough for the largest possible single view at this size, never fewer than 256
-      this.cacheCap = Math.max(256, (Math.ceil(this.sw * dpr / TS) + 2) * (Math.ceil(this.sh * dpr / TS) + 2) + 48);
+      this.cacheCap = Math.max(256, (Math.ceil(this.sw * dpr / TS) + 2) * (Math.ceil(this.sh * dpr / TS) + 2) + 160);
       this.clamp();
     }
     fitZ() { return Math.min(this.sw / this.W, this.sh / this.H); }
@@ -413,8 +413,17 @@ onmessage = (e) => {
 
     // ---------------------------------------------------------------- tiles
     renderTile(t) {
-      // synchronous tile paint — the fallback when worker painters are unavailable
+      // synchronous tile paint — the fallback when worker painters are unavailable.
+      // A tile painted by a worker holds an ImageBitmap, which has no 2d context: swap in a canvas.
+      if (!t.cv || typeof t.cv.getContext !== 'function') {
+        const cv = this.pool.pop() || document.createElement('canvas');
+        cv.width = cv.height = TS;
+        cv.getContext('2d').drawImage(t.cv, 0, 0, TS, TS);
+        if (t.cv && t.cv.close) t.cv.close();
+        t.cv = cv;
+      }
       tilePainter(this.mainEnv(), { L: t.L, tx: t.tx, ty: t.ty, cv: t.cv, dpr: this.dpr, front: this.opts.showFront !== false });
+      if (!t.ready) t.shownAt = performance.now();
       t.dirty = false; t.ready = true;
     }
 
@@ -466,6 +475,8 @@ onmessage = (e) => {
       entry.busy = false;
       const t = m.k != null ? this.tiles.get(m.k) : null;
       if (t && m.ver === this.version) {
+        if (!t.ready) t.shownAt = performance.now();
+        if (t.cv && typeof t.cv.getContext === 'function' && this.pool.length < 24) this.pool.push(t.cv);
         t.cv = m.bmp; t.dirty = false; t.ready = true; t.fly = false;
       } else {
         if (t) t.fly = false;                              // stale content: let the tile be re-enqueued
@@ -516,7 +527,7 @@ onmessage = (e) => {
       const tw = TS / (S0 * 2 ** L);
       let cv = this.pool.pop();
       if (!cv) { cv = document.createElement('canvas'); cv.width = cv.height = TS; }
-      t = { k, L, tx, ty, cv, x0: tx * tw, y0: ty * tw, x1: (tx + 1) * tw, y1: (ty + 1) * tw, dirty: true, ready: false, q: false, fly: false };
+      t = { k, L, tx, ty, cv, x0: tx * tw, y0: ty * tw, x1: (tx + 1) * tw, y1: (ty + 1) * tw, dirty: true, ready: false, q: false, fly: false, shownAt: 0 };
       this.tiles.set(k, t);
       return t;
     }
@@ -567,19 +578,46 @@ onmessage = (e) => {
         while (this.wq.length > 240) { const s = this.wq.pop(); s.q = false; }
         this.deliver();
       } else {
+        let blanks = 0;
         for (const t of need) {
           const blank = !t.ready && (t.L === 0 || !this.ancestor(t.L, t.tx, t.ty));
-          if (!blank && (moving || (rendered && performance.now() - t0 > 10))) continue;
+          if (moving) {
+            if (!blank) continue;                       // stand-ins carry the frame; paint when still
+            if (blanks++ >= 2) { if (rendered) break; continue; }
+          } else if (rendered && performance.now() - t0 > 8) continue;
           this.renderTile(t); rendered++;
-          if (moving && rendered >= 5) break;
         }
       }
       ctx.imageSmoothingEnabled = true;
+      // Whole-world base under everything: while sharper tiles stream in (or after a repaint)
+      // the map can never fall back to bare ocean-blue — no blank flash.
+      const W2 = this.cv.width, H2 = this.cv.height;
+      for (const t of this.tiles.values()) {
+        if (t.L !== 0 || !t.ready) continue;
+        const dx = (t.x0 - cam.x) * sc, dy = (t.y0 - cam.y) * sc, w = (t.x1 - t.x0) * sc, h = (t.y1 - t.y0) * sc;
+        if (dx > W2 || dy > H2 || dx + w < 0 || dy + h < 0) continue;
+        ctx.drawImage(t.cv, dx, dy, w, h);
+      }
+      // Tiles are placed at their exact sub-pixel rect (not snapped to whole device pixels):
+      // slow pans glide instead of stepping, and neighbouring tiles always meet on one edge.
+      const FADE = 130;
       for (const t of vis) {
-        const dx = Math.floor((t.x0 - cam.x) * sc), dy = Math.floor((t.y0 - cam.y) * sc);
-        const ex = Math.ceil((t.x1 - cam.x) * sc), ey = Math.ceil((t.y1 - cam.y) * sc);
-        if (t.ready) ctx.drawImage(t.cv, dx, dy, ex - dx, ey - dy);
-        else { const a = this.ancestor(t.L, t.tx, t.ty); if (a) ctx.drawImage(a.t.cv, a.sx, a.sy, TS / a.f, TS / a.f, dx, dy, ex - dx, ey - dy); }
+        const dx = (t.x0 - cam.x) * sc, dy = (t.y0 - cam.y) * sc;
+        const w = (t.x1 - t.x0) * sc + 0.5, h = (t.y1 - t.y0) * sc + 0.5;   // +0.5 hides sampling seams
+        if (t.ready) {
+          // a freshly painted tile cross-fades over its blurry stand-in instead of popping
+          const age = t.shownAt ? now - t.shownAt : FADE;
+          if (age < FADE) {
+            const a = this.ancestor(t.L, t.tx, t.ty);
+            if (a) ctx.drawImage(a.t.cv, a.sx, a.sy, TS / a.f, TS / a.f, dx, dy, w, h);
+            ctx.globalAlpha = age / FADE;
+          }
+          ctx.drawImage(t.cv, dx, dy, w, h);
+          if (age < FADE) ctx.globalAlpha = 1;
+        } else {
+          const a = this.ancestor(t.L, t.tx, t.ty);
+          if (a) ctx.drawImage(a.t.cv, a.sx, a.sy, TS / a.f, TS / a.f, dx, dy, w, h);
+        }
       }
       // idle prefetch: warm the tiles the user is about to see, so panning and zooming never
       // starts cold. The level above and below the current one around the centre, and the ring
@@ -602,6 +640,7 @@ onmessage = (e) => {
         pick(L + 1, cam.x + viewW * 0.2, cam.y + viewH * 0.2, cam.x + viewW * 0.8, cam.y + viewH * 0.8, 40);   // closer zoom-in
         pick(L - 1, cam.x - viewW * 0.25, cam.y - viewH * 0.25, cam.x + viewW * 1.25, cam.y + viewH * 1.25, 40);  // zoom-out reserve
         pick(L, Math.max(0, cam.x - viewW * 0.15), Math.max(0, cam.y - viewH * 0.15), cam.x + viewW * 1.15, cam.y + viewH * 1.15, 40);  // pan ring
+        if (this.tiles.size > this.cacheCap - 24) cand.length = 0;   // no room: painting it would evict it again
         if (this.workersActive()) this.enqueue(cand);
         else for (const t of cand) { if (performance.now() - t1 > 8) break; this.renderTile(t); }
       }
