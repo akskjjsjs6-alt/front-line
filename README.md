@@ -30,11 +30,10 @@ then open http://localhost:8000. For free hosting, turn on GitHub Pages (Setting
 
 ## The AI game master
 
-`supabase/functions/ai/index.ts` is a Supabase Edge Function that calls Claude, either through
-Vercel AI Gateway or the Claude API directly. It needs one secret in the Supabase project (Edge Functions → Secrets):
-`AI_GATEWAY_API_KEY` for a Vercel AI Gateway key, or `ANTHROPIC_API_KEY` for a Claude API key (a Vercel key stored
-under that name is detected too). Optionally set `CLAUDE_MODEL` to use a
-different model. When the server can't be reached, the game keeps working with simple built-in rules.
+`supabase/functions/ai/index.ts` is a Supabase Edge Function that calls an AI model through
+OpenRouter (default model `recursive/flint-v1.0:free`), Vercel AI Gateway or the Claude API. It needs one secret in the
+Supabase project (Edge Functions → Secrets): `OPENROUTER_API_KEY`, `AI_GATEWAY_API_KEY` or `ANTHROPIC_API_KEY`.
+Optionally set `AI_MODEL` to use a different model. When the server can't be reached, the game keeps working with simple built-in rules.
 
 ## Files
 

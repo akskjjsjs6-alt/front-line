@@ -1,15 +1,45 @@
 // Front Line AI game master. Runs as a Supabase Edge Function.
 // Needs one secret (Supabase dashboard -> Edge Functions -> Secrets):
+//   OPENROUTER_API_KEY  an OpenRouter key (sk-or-...), or
 //   AI_GATEWAY_API_KEY  a Vercel AI Gateway key, or
-//   ANTHROPIC_API_KEY   a Claude API key (a Vercel key stored here is detected and works too).
-// Optional: CLAUDE_MODEL to use a different model.
+//   ANTHROPIC_API_KEY   a Claude API key.
+// Optional: AI_MODEL to use a different model.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import Anthropic from "npm:@anthropic-ai/sdk";
 
-const KEY = Deno.env.get("AI_GATEWAY_API_KEY") || Deno.env.get("ANTHROPIC_API_KEY") || "";
-const VIA_VERCEL = !!Deno.env.get("AI_GATEWAY_API_KEY") || (KEY !== "" && !KEY.startsWith("sk-ant-"));
-const MODEL = Deno.env.get("CLAUDE_MODEL") || (VIA_VERCEL ? "anthropic/claude-opus-5.5" : "claude-opus-5-5");
+const KEY = Deno.env.get("OPENROUTER_API_KEY") || Deno.env.get("AI_GATEWAY_API_KEY") || Deno.env.get("ANTHROPIC_API_KEY") || "";
+const VIA: "openrouter" | "vercel" | "anthropic" =
+  !!Deno.env.get("OPENROUTER_API_KEY") || KEY.startsWith("sk-or-") ? "openrouter"
+  : !!Deno.env.get("AI_GATEWAY_API_KEY") || (KEY !== "" && !KEY.startsWith("sk-ant-")) ? "vercel"
+  : "anthropic";
+const VIA_VERCEL = VIA === "vercel";
+const MODEL = Deno.env.get("AI_MODEL") || Deno.env.get("CLAUDE_MODEL") ||
+  { openrouter: "recursive/flint-v1.0:free", vercel: "anthropic/claude-opus-5.5", anthropic: "claude-opus-5-5" }[VIA];
 const client = new Anthropic({ apiKey: KEY, ...(VIA_VERCEL ? { baseURL: "https://ai-gateway.vercel.sh" } : {}) });
+
+class AIError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
+
+// OpenRouter speaks the OpenAI chat completions format.
+// deno-lint-ignore no-explicit-any
+async function openrouter(body: Record<string, unknown>): Promise<any> {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${KEY}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://akskjjsjs6-alt.github.io/front-line/",
+      "X-Title": "Front Line",
+    },
+    body: JSON.stringify({ model: MODEL, ...body }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.error) {
+    throw new AIError(data.error?.code || res.status, data.error?.message || `OpenRouter error ${res.status}`);
+  }
+  return data;
+}
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -135,7 +165,32 @@ function parseJson(text: string) {
 async function ask(system: string, user: string, schema: object, effort: "low" | "medium") {
   const sys = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
   const msgs = [{ role: "user", content: user }];
-  if (!VIA_VERCEL) {
+  if (VIA === "openrouter") {
+    const base = { max_tokens: 16000, reasoning: { effort, exclude: true } };
+    const text = (d: { choices?: { message?: { content?: string } }[] }) => {
+      const t = d.choices?.[0]?.message?.content || "";
+      if (!t) throw new Error("The AI sent an empty answer.");
+      return t;
+    };
+    try {
+      return parseJson(text(await openrouter({
+        ...base,
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        response_format: { type: "json_schema", json_schema: { name: "answer", strict: true, schema } },
+      })));
+    } catch (e) {
+      if (e instanceof AIError && (e.status === 401 || e.status === 402 || e.status === 429)) throw e;
+      // some models ignore or reject structured output: ask for JSON in the prompt instead
+      return parseJson(text(await openrouter({
+        ...base,
+        messages: [
+          { role: "system", content: system + "\n\nReply with only one JSON object, no other text, that matches this JSON schema:\n" + JSON.stringify(schema) },
+          { role: "user", content: user },
+        ],
+      })));
+    }
+  }
+  if (VIA === "anthropic") {
     const res = await client.beta.messages.create({
       model: MODEL, max_tokens: 16000,
       betas: ["server-side-fallback-2026-07-01"],
@@ -181,17 +236,21 @@ Deno.serve(async (req: Request) => {
   if (body.mode === "ping") {
     if (!ready) return json({ ok: false, reason: "missing key", model: MODEL });
     try {
-      // check the key works: free on the Claude API, a one-token reply through Vercel
-      if (VIA_VERCEL) await client.messages.create({ model: MODEL, max_tokens: 1, messages: [{ role: "user", content: "ok" }] });
+      // check the key works without spending anything where possible
+      if (VIA === "openrouter") {
+        const r = await fetch("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${KEY}` } });
+        if (r.status === 401) return json({ ok: false, reason: "invalid key", model: MODEL });
+        if (!r.ok) return json({ ok: false, reason: `OpenRouter error ${r.status}`, model: MODEL });
+      } else if (VIA_VERCEL) await client.messages.create({ model: MODEL, max_tokens: 1, messages: [{ role: "user", content: "ok" }] });
       else await client.models.retrieve(MODEL);
-      return json({ ok: true, model: MODEL, via: VIA_VERCEL ? "vercel" : "anthropic" });
+      return json({ ok: true, model: MODEL, via: VIA });
     } catch (e) {
       if (e instanceof Anthropic.AuthenticationError) return json({ ok: false, reason: "invalid key", model: MODEL });
       if (String(e).includes("customer_verification_required")) return json({ ok: false, reason: "Vercel needs a credit card on file before AI Gateway works", model: MODEL });
       return json({ ok: false, reason: String(e), model: MODEL });
     }
   }
-  if (!ready) return json({ error: "The AI is not set up yet (missing AI_GATEWAY_API_KEY or ANTHROPIC_API_KEY)." }, 503);
+  if (!ready) return json({ error: "The AI is not set up yet (missing OPENROUTER_API_KEY)." }, 503);
   try {
     if (body.mode === "turn") {
       const user = [
@@ -220,6 +279,12 @@ Deno.serve(async (req: Request) => {
     }
     return json({ error: "Unknown mode" }, 400);
   } catch (e) {
+    if (e instanceof AIError) {
+      if (e.status === 401) return json({ error: "The AI key is invalid." }, 503);
+      if (e.status === 429) return json({ error: "The free AI is busy or out of free requests for today. Try again later." }, 429);
+      if (e.status === 402) return json({ error: "The OpenRouter account is out of credits." }, 503);
+      return json({ error: `AI error ${e.status}: ${e.message}` }, 502);
+    }
     if (e instanceof Anthropic.RateLimitError) return json({ error: "The AI is busy. Try again in a minute." }, 429);
     if (e instanceof Anthropic.AuthenticationError) return json({ error: "The AI key is invalid." }, 503);
     if (String(e).includes("customer_verification_required")) return json({ error: "Vercel AI Gateway needs a credit card on the account before it will answer." }, 503);
