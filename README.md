@@ -32,10 +32,13 @@ then open http://localhost:8000. For free hosting, turn on GitHub Pages (Setting
 ## The AI game master
 
 `supabase/functions/ai/index.ts` is a Supabase Edge Function that calls an AI model through
-OpenRouter (all free models: it tries the fastest first and, if one is slow, starts the next and takes the first good
-answer), Vercel AI Gateway or the Claude API. It needs one secret in the
-Supabase project (Edge Functions → Secrets): `OPENROUTER_API_KEY`, `AI_GATEWAY_API_KEY` or `ANTHROPIC_API_KEY`.
-Optionally set `AI_MODEL` to use a different model. When the server can't be reached, the game keeps working with simple built-in rules.
+**Groq** (the default when `GROQ_API_KEY` is set), OpenRouter (all free models: it tries the fastest first and, if one
+is slow, starts the next and takes the first good answer), Vercel AI Gateway or the Claude API. It needs one secret in
+the Supabase project (Edge Functions → Secrets), in this order of preference: `GROQ_API_KEY` (a `gsk_...` key from
+console.groq.com), `OPENROUTER_API_KEY`, `AI_GATEWAY_API_KEY` or `ANTHROPIC_API_KEY`.
+With Groq, this cascade is tried in order until one answers: `openai/gpt-oss-120b`, `openai/gpt-oss-20b`,
+`qwen/qwen3.8-27b`, `llama-3.3-70b-versatile`; a model at its rate limit is skipped for the next one. Set `AI_MODEL`
+to put a different model first. When the server can't be reached, the game keeps working with simple built-in rules.
 
 ## Files
 

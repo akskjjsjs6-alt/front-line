@@ -1,25 +1,159 @@
 // Front Line AI game master. Runs as a Supabase Edge Function.
 // Needs one secret (Supabase dashboard -> Edge Functions -> Secrets):
+//   GROQ_API_KEY        a GroqCloud key (gsk_...) — fast, with generous rate limits
 //   OPENROUTER_API_KEY  an OpenRouter key (sk-or-...), or
 //   AI_GATEWAY_API_KEY  a Vercel AI Gateway key, or
 //   ANTHROPIC_API_KEY   a Claude API key.
-// With OpenRouter, every free model is tried in turn (fastest first) until one answers quickly.
+// With Groq, GROQ_MODELS below is tried in order until one answers. With OpenRouter, every free
+// model is tried in turn (fastest first) until one answers quickly.
 // Optional: AI_MODEL to put one model first.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import Anthropic from "npm:@anthropic-ai/sdk";
 
-const KEY = Deno.env.get("OPENROUTER_API_KEY") || Deno.env.get("AI_GATEWAY_API_KEY") || Deno.env.get("ANTHROPIC_API_KEY") || "";
-const VIA: "openrouter" | "vercel" | "anthropic" =
-  !!Deno.env.get("OPENROUTER_API_KEY") || KEY.startsWith("sk-or-") ? "openrouter"
-  : !!Deno.env.get("AI_GATEWAY_API_KEY") || (KEY !== "" && !KEY.startsWith("sk-ant-")) ? "vercel"
-  : "anthropic";
+const GROQ_KEY = Deno.env.get("GROQ_API_KEY") || "";
+const OPENROUTER_KEY = Deno.env.get("OPENROUTER_API_KEY") || "";
+const GATEWAY_KEY = Deno.env.get("AI_GATEWAY_API_KEY") || "";
+const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
+type Via = "groq" | "openrouter" | "vercel" | "anthropic";
+let VIA: Via = "anthropic";
+let KEY = ANTHROPIC_KEY;
+if (GROQ_KEY) { VIA = "groq"; KEY = GROQ_KEY; }
+else if (OPENROUTER_KEY) { VIA = "openrouter"; KEY = OPENROUTER_KEY; }
+else if (GATEWAY_KEY) { VIA = "vercel"; KEY = GATEWAY_KEY; }
+else if (KEY.startsWith("sk-or-")) { VIA = "openrouter"; }
+else if (KEY !== "" && !KEY.startsWith("sk-ant-")) { VIA = "vercel"; }
 const VIA_VERCEL = VIA === "vercel";
+// Groq model cascade: quality first, then smaller/faster models whose rate limits are separate.
+const GROQ_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "llama-3.3-70b-versatile"];
 const MODEL = Deno.env.get("AI_MODEL") || Deno.env.get("CLAUDE_MODEL") ||
-  { openrouter: "free models (auto)", vercel: "anthropic/claude-opus-5.5", anthropic: "claude-opus-5-5" }[VIA];
+  { groq: GROQ_MODELS[0], openrouter: "free models (auto)", vercel: "anthropic/claude-opus-5.5", anthropic: "claude-opus-5-5" }[VIA];
 const client = new Anthropic({ apiKey: KEY, ...(VIA_VERCEL ? { baseURL: "https://ai-gateway.vercel.sh" } : {}) });
 
 class AIError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  code?: string;
+  constructor(public status: number, message: string, code?: string) { super(message); this.code = code; }
+}
+
+// ---------------------------------------------------------------- Groq (primary)
+// Groq speaks the OpenAI chat completions format. Models differ in what they accept (strict json_schema,
+// max_tokens vs max_completion_tokens, reasoning_effort), so each model starts with the best settings and
+// drops to a weaker mode when the API rejects one. What worked is remembered for the life of the isolate.
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+type GroqCaps = { format: "schema" | "json" | "prompt"; tokens: "max_completion_tokens" | "max_tokens"; reason: boolean };
+const groqCaps = new Map<string, GroqCaps>();
+const groqDefault = (model: string): GroqCaps => ({
+  format: "schema",
+  tokens: model.startsWith("openai/") ? "max_completion_tokens" : "max_tokens",
+  reason: model.startsWith("openai/"),
+});
+
+// deno-lint-ignore no-explicit-any
+async function groqChat(body: Record<string, unknown>, ms: number, stop?: AbortSignal): Promise<any> {
+  const t0 = Date.now();
+  const res = await fetch(GROQ_URL, {
+    method: "POST",
+    signal: stop ? AbortSignal.any([AbortSignal.timeout(ms), stop]) : AbortSignal.timeout(ms),
+    headers: { "Authorization": `Bearer ${GROQ_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  const msg = String(data?.error?.message ?? "");
+  console.log(`groq ${body.model} ${res.status} ${Date.now() - t0}ms ${msg ? msg.slice(0, 140) : "ok"}`);
+  if (!res.ok || data?.error) {
+    throw new AIError(res.status, msg || `Groq error ${res.status}`, typeof data?.error?.code === "string" ? data.error.code : undefined);
+  }
+  return data;
+}
+
+async function askGroqModel(
+  model: string, system: string, user: string, schema: { required?: string[] }, tokens: number, ms: number, stop?: AbortSignal,
+) {
+  const caps: GroqCaps = { ...(groqCaps.get(model) || groqDefault(model)) };
+  const inPrompt = "\n\nReply with only one JSON object, no other text, that matches this JSON schema:\n" + JSON.stringify(schema);
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const body: Record<string, unknown> = {
+      model,
+      [caps.tokens]: tokens,
+      messages: [
+        { role: "system", content: system + (caps.format === "schema" ? "" : inPrompt) },
+        { role: "user", content: user },
+      ],
+    };
+    if (caps.reason) body.reasoning_effort = "low";
+    if (caps.format === "schema") body.response_format = { type: "json_schema", json_schema: { name: "answer", strict: true, schema } };
+    else if (caps.format === "json") body.response_format = { type: "json_object" };
+    try {
+      const d = await groqChat(body, ms, stop);
+      const choice = d.choices?.[0];
+      if (choice?.finish_reason === "length") throw new Error("The AI ran out of space for its answer.");
+      const text = choice?.message?.content || "";
+      if (!text.trim()) throw new Error("empty answer");
+      const out = parseJson(text);
+      for (const k of schema.required || []) if (!(k in out)) throw new Error(`answer is missing "${k}"`);
+      groqCaps.set(model, caps);
+      return out;
+    } catch (e) {
+      lastErr = e;
+      if (!(e instanceof AIError)) throw e;                      // bad answer: let the cascade try the next model
+      const why = e.message.toLowerCase();
+      if (e.status !== 400) throw e;                             // 429/401/5xx are the cascade's business
+      if (caps.format === "schema" && /response_format|json_schema|schema|strict/i.test(why)) {
+        caps.format = "json";
+        continue;
+      }
+      if (caps.format === "json" && /response_format|json_object|schema/i.test(why)) {
+        caps.format = "prompt";
+        continue;
+      }
+      if (/max_completion_tokens|max_tokens|token/i.test(why)) {
+        caps.tokens = caps.tokens === "max_tokens" ? "max_completion_tokens" : "max_tokens";
+        continue;
+      }
+      if (/reasoning/i.test(why)) { caps.reason = false; continue; }
+      throw e;
+    }
+  }
+  throw lastErr || new Error("Groq did not answer.");
+}
+
+async function groqCascade(
+  system: string, user: string, schema: object, kind: "turn" | "chat", pick: Pick,
+) {
+  const wanted = pick.model && GROQ_MODELS.includes(pick.model) ? pick.model : MODEL;
+  const order = [wanted, ...GROQ_MODELS.filter(m => m !== wanted)];
+  const tokens = kind === "chat" ? 3000 : 8000;
+  const perModel = kind === "chat" ? 28_000 : 60_000;
+  const deadline = Date.now() + 90_000;
+  let lastErr: unknown = null;
+  for (let round = 0; round < 2; round++) {
+    let rateLimited = false;
+    for (const model of order) {
+      const left = deadline - Date.now();
+      if (left < 4000) break;
+      try {
+        const out = await askGroqModel(model, system, user, schema as { required?: string[] }, tokens, Math.min(perModel, left));
+        if (out._model === undefined) console.log(`answered by ${model}`);
+        return { ...out, _model: model };
+      } catch (e) {
+        lastErr = e;
+        if (e instanceof AIError) {
+          if (e.status === 401) throw e;                         // bad key: no model will work
+          if (e.status === 429) { rateLimited = true; continue; } // this model is at its limit: next one
+          if (e.status === 403 || e.status >= 500) continue;     // no access to this model / provider hiccup
+          continue;                                              // a 400 we could not fix: another model may accept it
+        }
+        console.log(`groq skip ${model}: ${String(e).slice(0, 160)}`);
+      }
+    }
+    // Every model was busy at once. Rate limits clear within seconds, so rest and walk the list again.
+    if (round === 0 && rateLimited && Date.now() < deadline - 25_000) {
+      await new Promise(r => setTimeout(r, 5000));
+      continue;
+    }
+    break;
+  }
+  throw lastErr || new Error("Groq did not answer.");
 }
 
 // OpenRouter speaks the OpenAI chat completions format.
@@ -272,6 +406,7 @@ async function cascade(system: string, user: string, schema: object, kind: "turn
 async function ask(system: string, user: string, schema: object, effort: "low" | "medium", pick: Pick = {}) {
   const sys = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
   const msgs = [{ role: "user", content: user }];
+  if (VIA === "groq") return await groqCascade(system, user, schema, effort === "low" ? "chat" : "turn", pick);
   if (VIA === "openrouter") return await cascade(system, user, schema, effort === "low" ? "chat" : "turn", pick);
   if (VIA === "anthropic") {
     const res = await client.beta.messages.create({
@@ -316,12 +451,21 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Bad JSON" }, 400);
   }
   const ready = KEY !== "";
-  const pick: Pick = { model: typeof body.model === "string" && body.model.endsWith(":free") ? body.model : undefined };
+  const keyName = { groq: "GROQ_API_KEY", openrouter: "OPENROUTER_API_KEY", vercel: "AI_GATEWAY_API_KEY", anthropic: "ANTHROPIC_API_KEY" }[VIA];
+  const pick: Pick = {
+    model: typeof body.model === "string" && (body.model.endsWith(":free") || GROQ_MODELS.includes(body.model)) ? body.model : undefined,
+  };
   if (body.mode === "ping") {
-    if (!ready) return json({ ok: false, reason: "missing key", model: MODEL });
+    if (!ready) return json({ ok: false, reason: `missing ${keyName}`, model: MODEL });
     try {
       // check the key works without spending anything where possible
-      if (VIA === "openrouter") {
+      if (VIA === "groq") {
+        const r = await fetch("https://api.groq.com/openai/v1/models", {
+          headers: { Authorization: `Bearer ${GROQ_KEY}` }, signal: AbortSignal.timeout(8000),
+        });
+        if (r.status === 401 || r.status === 403) return json({ ok: false, reason: "invalid key", model: MODEL });
+        if (!r.ok) return json({ ok: false, reason: `Groq error ${r.status}`, model: MODEL });
+      } else if (VIA === "openrouter") {
         const r = await fetch("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${KEY}` } });
         if (r.status === 401) return json({ ok: false, reason: "invalid key", model: MODEL });
         if (!r.ok) return json({ ok: false, reason: `OpenRouter error ${r.status}`, model: MODEL });
@@ -334,7 +478,7 @@ Deno.serve(async (req: Request) => {
       return json({ ok: false, reason: String(e), model: MODEL });
     }
   }
-  if (!ready) return json({ error: "The AI is not set up yet (missing OPENROUTER_API_KEY)." }, 503);
+  if (!ready) return json({ error: `The AI is not set up yet (missing ${keyName}).` }, 503);
   try {
     if (body.mode === "turn") {
       const user = [
@@ -365,8 +509,12 @@ Deno.serve(async (req: Request) => {
   } catch (e) {
     if (e instanceof AIError) {
       if (e.status === 401) return json({ error: "The AI key is invalid." }, 503);
-      if (e.status === 429) return json({ error: "The free AI is busy or out of free requests for today. Try again later." }, 429);
-      if (e.status === 402) return json({ error: "The OpenRouter account is out of credits." }, 503);
+      if (e.status === 429) return json({
+        error: VIA === "groq"
+          ? "The AI hit its rate limit for a moment. Try again in a minute."
+          : "The free AI is busy or out of free requests for today. Try again later.",
+      }, 429);
+      if (e.status === 402 && VIA === "openrouter") return json({ error: "The OpenRouter account is out of credits." }, 503);
       return json({ error: `AI error ${e.status}: ${e.message}` }, 502);
     }
     if (e instanceof Error && e.name === "TimeoutError") return json({ error: "The AI took too long to answer." }, 504);
