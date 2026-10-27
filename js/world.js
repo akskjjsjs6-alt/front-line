@@ -5,7 +5,7 @@
   // ------------------------------------------------------------------ periods
   const PERIODS = {
     '1900': {
-      id: '1900', file: 'data/world-1900.json', start: [1900, 1], title: 'The Age of Empires', speed: 14, recruitCost: 6,
+      id: '1900', file: 'data/world-1900.json?v=2', start: [1900, 1], title: 'The Age of Empires', speed: 14, recruitCost: 6,
       blurb: 'Queen Victoria still reigns. Europe\'s empires cover the globe, the Boer War rages and China simmers. Fourteen years of peace remain, unless someone breaks it sooner.',
       units: { inf: 0.7, recon: 0.2, art: 0.1 },
       wars: [['United Kingdom', 'Transvaal'], ['United Kingdom', 'Orange Free State']],
@@ -13,11 +13,11 @@
       hostile: [['France', 'Germany', -45], ['Russia', 'Japan', -40], ['United Kingdom', 'Russia', -25], ['Austria-Hungary', 'Serbia', -30], ['Russia', 'Ottoman Empire', -35], ['United Kingdom', 'France', -15]]
     },
     '1939': {
-      id: '1939', file: 'data/world-1939.json', start: [1939, 3], title: 'The Gathering Storm', speed: 22, recruitCost: 8,
+      id: '1939', file: 'data/world-1939.json?v=2', start: [1939, 3], title: 'The Gathering Storm', speed: 22, recruitCost: 8,
       blurb: 'Germany has swallowed Austria and eyes Poland. Japan is at war in China. Britain and France promise to defend Poland. The world holds its breath.',
       units: { inf: 0.55, mech: 0.15, armor: 0.12, recon: 0.06, art: 0.1, ad: 0.02 },
       wars: [['Japan', 'China']],
-      alliances: [['Germany', 'Italy'], ['Germany', 'Japan'], ['United Kingdom', 'France'], ['France', 'Poland'], ['United Kingdom', 'Poland'], ['USSR', 'Mongolia']],
+      alliances: [['Germany', 'Italy'], ['Germany', 'Japan'], ['Germany', 'Slovakia'], ['United Kingdom', 'France'], ['France', 'Poland'], ['United Kingdom', 'Poland'], ['USSR', 'Mongolia']],
       hostile: [['Germany', 'Poland', -50], ['Germany', 'France', -40], ['Germany', 'United Kingdom', -25], ['USSR', 'Germany', -35], ['Japan', 'USSR', -45], ['Japan', 'United States', -30], ['Italy', 'France', -25], ['Hungary', 'Romania', -35], ['Germany', 'Czechoslovakia', -60]]
     },
     '2003': {
@@ -86,6 +86,7 @@
       'China': [80, 0.6, 35, 'Nationalist republic', 'Generalissimo Chiang Kai-shek'],
       'Poland': [40, 0.85, 45, 'Republic (Sanation regime)', 'Marshal Edward Rydz-Śmigły'],
       'Czechoslovakia': [30, 1.0, 50, 'Republic', 'President Emil Hácha'],
+      'Slovakia': [3, 0.8, 20, 'One-party state (German protection)', 'President Jozef Tiso'],
       'Spain': [20, 0.8, 30, 'Nationalist dictatorship', 'Generalísimo Francisco Franco'],
       'Turkey': [25, 0.8, 35, 'Republic', 'President İsmet İnönü'],
       'Hungary': [10, 0.85, 40, 'Regency', 'Regent Miklós Horthy'],
@@ -238,14 +239,15 @@
       });
     });
     g.owner = data.provinces.map(p => p.o);
-    g.ctrl = g.owner.slice();
+    // some land starts occupied (Japanese-held China in 1939)
+    g.ctrl = data.provinces.map(p => p.oc != null ? p.oc : p.o);
     const idx = name => g.nations.findIndex(n => n.name === name);
     for (const [a, b] of P.alliances) { const i = idx(a), j = idx(b); if (i >= 0 && j >= 0) ally(g, i, j); }
     for (const [a, b] of P.wars) { const i = idx(a), j = idx(b); if (i >= 0 && j >= 0) { setWar(g, i, j, true); g.starter = g.starter || {}; g.starter[key(i, j)] = i; } }
     for (const [a, b, v] of P.hostile) { const i = idx(a), j = idx(b); if (i >= 0 && j >= 0) { setRel(g, i, j, v); setRel(g, j, i, v); } }
     // starting armies: the capital plus the most contested borders
     g.nations.forEach((n, i) => {
-      const borders = borderProvinces(data, g, i);
+      const borders = borderProvinces(data, g, i).filter(p => g.ctrl[p] === i);
       let left = n.startDiv;
       const capShare = borders.length ? Math.max(1, Math.round(left * 0.35)) : left;
       addArmy(g, i, n.cap, capShare); left -= capShare;
@@ -261,6 +263,8 @@
       }
       if (left > 0.5) addArmy(g, i, n.cap, left);
     });
+    // occupiers garrison the land they hold
+    data.provinces.forEach((p, k) => { if (p.oc != null && g.nations[p.oc]) addArmy(g, p.oc, k, 3); });
     mergeArmies(g, true);
     g.player = idx(playerName);
     g.generals = []; g.inbox = [];
@@ -946,7 +950,7 @@
       [1914, 8, 'war', 'Germany', 'France', 'The Great War'], [1914, 8, 'war', 'United Kingdom', 'Germany', 'The Great War'],
       [1914, 11, 'war', 'Ottoman Empire', 'Russia', 'The Ottomans join the war'], [1915, 5, 'war', 'Italy', 'Austria-Hungary', 'Italy joins the Entente'],
       [1917, 4, 'war', 'United States', 'Germany', 'America enters the war']],
-    '1939': [[1939, 3, 'annex', 'Germany', 'Czechoslovakia', 'Germany occupies Bohemia and Moravia'], [1939, 4, 'annex', 'Italy', 'Albania', 'Italy invades Albania'],
+    '1939': [[1939, 4, 'annex', 'Italy', 'Albania', 'Italy invades Albania'],
       [1939, 8, 'pact', 'Germany', 'USSR', 'Molotov-Ribbentrop Pact'], [1939, 9, 'war', 'Germany', 'Poland', 'Fall Weiss'], [1939, 9, 'war', 'USSR', 'Poland', 'Soviet invasion of Poland'],
       [1939, 11, 'war', 'USSR', 'Finland', 'The Winter War'], [1940, 4, 'war', 'Germany', 'Denmark', 'Operation Weserübung'], [1940, 4, 'war', 'Germany', 'Norway', 'Operation Weserübung'],
       [1940, 5, 'war', 'Germany', 'Netherlands', 'Fall Gelb'], [1940, 5, 'war', 'Germany', 'Belgium', 'Fall Gelb'], [1940, 6, 'war', 'Italy', 'France', 'Italy joins the war'],
