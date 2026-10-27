@@ -2,6 +2,7 @@
    signal - VHS look: wireframe globe, glitch cards, Europe tilted with the strike on Warsaw, the world alight
    war    - hard red/black/white cuts: typed date, nation silhouettes, one-word cards, a red globe
    neon   - colour-cycling nation shapes beside stacked, repeated lettering
+   strike, theatres, countdown - remixes of the first two, built from the shared scenes below
    Plays once per browser session; any key, click or "Skip" ends it. */
 (function (root) {
   'use strict';
@@ -12,15 +13,15 @@
   const T = { globe: 0, card1: 3.4, europe: 5.0, rapid: 9.8, fire: 11.3, end: 13.7, out: 16.6 };
   const RAPID = ['MOBILISE', 'DECLARE', 'CONQUER'];
 
-  const DUR = { signal: T.out, war: 12.4, neon: 11.2 };
+  const DUR = { signal: T.out, war: 12.4, neon: 11.2, strike: 0, theatres: 0, countdown: 0 };
   function play(dataPromise, style) {
-    style = DUR[style] ? style : 'signal';
+    style = style in DUR ? style : 'signal';
     return new Promise(resolve => {
       const box = document.getElementById('intro'), cv = document.getElementById('intro-cv');
       const tc = document.getElementById('intro-tc'), date = document.getElementById('intro-date');
       const c = cv.getContext('2d'), buf = document.createElement('canvas'), b = buf.getContext('2d');
       let W = 0, H = 0, dpr = 1, geo = null, data = null, t0 = 0, raf = 0, done = false;
-      let lines = null, euro = null, shapes = null;
+      let lines = null, euro = null, shapes = null, TH = null, seq = null;
 
       function size() {
         dpr = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight;
@@ -41,7 +42,14 @@
 
       dataPromise.then(d => {
         data = d; geo = root.WorldMap.prepare(d);
-        lines = coastLines(geo); euro = europe(d, geo); shapes = nationShapes(d, geo);
+        lines = coastLines(geo); shapes = nationShapes(d, geo);
+        TH = {
+          poland: theatre(d, geo, { box: [-6, 60, 36, 40], att: 'Germany', def: 'Poland', from: 'BERLIN', to: 'WARSAW' }),
+          france: theatre(d, geo, { box: [-8, 57, 22, 40], att: 'Germany', def: 'France', from: 'BERLIN', to: 'PARIS', near: 900 }),
+          malaya: theatre(d, geo, { box: [92, 40, 146, -12], att: 'Japan', def: 'United Kingdom', from: 'TOKYO', to: 'SINGAPORE', at: [103.8, 1.35], near: 600 })
+        };
+        euro = TH.poland;
+        seq = SEQS[style] ? SEQS[style]() : null; if (seq) DUR[style] = seq.reduce((a, x) => a + x[0], 0);
         box.dataset.style = style;
         t0 = performance.now(); raf = requestAnimationFrame(frame);
       }, finish);
@@ -56,6 +64,8 @@
         b.globalCompositeOperation = 'source-over'; b.globalAlpha = 1;
         b.fillStyle = '#05040a'; b.fillRect(0, 0, W, H);
         let glitch = 0;
+        if (seq) { let at = 0, cur = seq[seq.length - 1], u = 0; for (const x of seq) { if (t < at + x[0]) { cur = x; u = t - at; break; } at += x[0]; }
+          glitch = cur[1](b, u) || 0; composite(glitch + (u < .1 ? .6 : 0)); tc.textContent = timecode(t); date.textContent = cur[2] || ''; raf = requestAnimationFrame(frame); return; }
         if (style === 'war') { glitch = warFrame(b, t); composite(glitch); tc.textContent = timecode(t); date.textContent = t < 5.6 ? '01.09.1939' : t < 9.8 ? '07.12.1941' : '--.--.----'; raf = requestAnimationFrame(frame); return; }
         if (style === 'neon') { glitch = neonFrame(b, t); composite(.45 + glitch); tc.textContent = timecode(t); date.textContent = ''; raf = requestAnimationFrame(frame); return; }
         if (t < T.card1) { globe(b, t, 0, Math.min(1, t / .6)); }
@@ -153,38 +163,41 @@
         if ('letterSpacing' in g) g.letterSpacing = '0px';
         return t < .18 ? 1 : 0;
       }
-      function endCard(g, t) {
+      function endCard(g, t, pal) {
+        pal = pal || LILAC_PAL;
         // a perspective grid floor, then the name
-        g.strokeStyle = 'rgba(201,178,255,.22)'; g.lineWidth = 1;
+        g.strokeStyle = `rgba(${pal.ring},.22)`; g.lineWidth = 1;
         const hy = H * .62;
         for (let i = -20; i <= 20; i++) { g.beginPath(); g.moveTo(W / 2 + i * 12, hy); g.lineTo(W / 2 + i * W * .12, H); g.stroke(); }
         for (let k = 0; k < 12; k++) { const yy = hy + (H - hy) * Math.pow(((k + (t * .8) % 1) / 12), 2); g.beginPath(); g.moveTo(0, yy); g.lineTo(W, yy); g.stroke(); }
         const a = Math.min(1, t / .5), fs = Math.min(W * .12, H * .16);
         g.globalAlpha = a; g.textAlign = 'center'; g.textBaseline = 'middle';
         g.font = `300 ${fs}px "Spectral", Georgia, serif`; if ('letterSpacing' in g) g.letterSpacing = (fs * .35).toFixed(1) + 'px';
-        g.shadowColor = 'rgba(255,79,216,.7)'; g.shadowBlur = 30; g.fillStyle = '#fff';
+        g.shadowColor = `rgba(${pal.hot},.7)`; g.shadowBlur = 30; g.fillStyle = '#fff';
         g.fillText('IMPERIUM', W / 2 + fs * .17, H * .42); g.shadowBlur = 0;
         g.font = `500 ${Math.max(11, fs * .13)}px "IBM Plex Mono", monospace`; if ('letterSpacing' in g) g.letterSpacing = '6px';
-        g.fillStyle = 'rgba(225,212,255,.85)'; g.fillText('LEAD ANY NATION · 1900 · 1939 · 2003', W / 2, H * .42 + fs * .75);
+        g.fillStyle = `rgba(${pal.line},.85)`; g.fillText('LEAD ANY NATION · 1900 · 1939 · 2003', W / 2, H * .42 + fs * .75);
         if ('letterSpacing' in g) g.letterSpacing = '0px';
         g.globalAlpha = 1;
         if (t > 2.4) { g.fillStyle = `rgba(0,0,0,${Math.min(1, (t - 2.4) / .5)})`; g.fillRect(0, 0, W, H); }
         return t < .25 || (t > 1.2 && t < 1.32) ? 1 : 0;
       }
 
-      // ---------------------------------------------------------------- Europe, 1 September 1939
-      function europeScene(g, t) {
-        const E = euro; if (!E) return;
+      // ---------------------------------------------------------------- a campaign on a tilted map
+      function europeScene(g, t) { theatreScene(g, t, euro, LILAC_PAL); }
+      function theatreScene(g, t, E, pal) {
+        if (!E) return;
         // tilted plane: the map is squashed vertically and pushed in slowly
         const span = E.box[2] - E.box[0], s = Math.max(W / span, H / (E.box[3] - E.box[1]) / .62) * (1.05 + t * .05);
         const cx = (E.box[0] + E.box[2]) / 2 + t * 3, cy = (E.box[1] + E.box[3]) / 2;
         const toS = (x, y) => [W / 2 + (x - cx) * s, H * .54 + (y - cy) * s * .62];
         g.save(); g.setTransform(dpr * s, 0, 0, dpr * s * .62, dpr * (W / 2 - cx * s), dpr * (H * .54 - cy * s * .62));
         g.fillStyle = '#1b1f2e'; g.fill(E.land);
-        g.fillStyle = E.hatch(g); g.fill(E.ger);
-        const k = Math.max(0, Math.min(1, (t - 2) / 2.6)), n = Math.floor(E.pol.length * k);
-        if (n) { const p = new Path2D(); for (let i = 0; i < n; i++) p.addPath(E.pol[i]); g.fill(p); }
-        g.globalAlpha = .9; g.fillStyle = 'rgba(255,79,216,.35)'; g.fill(E.ger); if (n) { const p = new Path2D(); for (let i = 0; i < n; i++) p.addPath(E.pol[i]); g.fill(p); }
+        g.fillStyle = E.hatch(g, pal.hot); g.fill(E.ger);
+        const k = Math.max(0, Math.min(1, (t - 2) / 2.2)), n = Math.floor(E.pol.length * k);
+        const taken = new Path2D(); for (let i = 0; i < n; i++) taken.addPath(E.pol[i]);
+        if (n) g.fill(taken);
+        g.globalAlpha = .9; g.fillStyle = `rgba(${pal.hot},.35)`; g.fill(E.ger); if (n) g.fill(taken);
         g.globalAlpha = 1; g.lineJoin = 'round';
         g.strokeStyle = 'rgba(169,195,255,.25)'; g.lineWidth = .6 / s; g.stroke(E.prov);
         g.strokeStyle = 'rgba(200,215,255,.9)'; g.lineWidth = 1.6 / s; g.stroke(E.border);
@@ -206,7 +219,7 @@
         }
         // labels
         g.font = '600 13px "IBM Plex Mono", monospace'; g.fillStyle = 'rgba(255,255,255,.85)'; g.textAlign = 'left';
-        g.fillText('BERLIN', a[0] + 8, a[1] - 6); g.fillText('WARSAW', z[0] + 10, z[1] + 16);
+        g.fillText(E.fromName, a[0] + 8, a[1] - 6); g.fillText(E.toName, z[0] + 10, z[1] + 16);
       }
 
       // ---------------------------------------------------------------- war footing
@@ -293,6 +306,65 @@
         g.restore();
       }
 
+      // ---------------------------------------------------------------- shared pieces for the remixes
+      function typed(g, u, txt, dur) {
+        const n = Math.min(txt.length, Math.floor(u / dur * txt.length));
+        g.font = `500 ${Math.min(30, W / 26)}px "IBM Plex Mono", monospace`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#fff';
+        g.fillText(txt.slice(0, n) + (Math.floor(u * 4) % 2 ? '_' : ' '), W / 2, H / 2); return 0;
+      }
+      function silFrame(g, u, nm, inv, label) {
+        g.fillStyle = inv ? '#d4141f' : '#000'; g.fillRect(0, 0, W, H);
+        silhouette(g, nm, [W * .1, H * .1, W * .8, H * .72], inv ? '#000' : '#e8202f', inv ? '#000' : '#ff5a64');
+        for (let y = 0; y < H; y += 4) { g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(0, y, W, 1); }
+        const fs = Math.min(W / 9, H * .14);
+        g.font = `800 ${fs}px "Barlow Condensed", "Arial Narrow", sans-serif`; g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.fillStyle = '#fff';
+        g.fillText((label || nm).toUpperCase(), W * .06, H * .92);
+        if (u < .05) { g.fillStyle = 'rgba(255,255,255,.85)'; g.fillRect(0, 0, W, H); }
+        return u < .08 ? 1 : 0;
+      }
+      const SEQS = {
+        // Signal's opening and globe, War footing's colours and cuts
+        strike: () => [
+          [2.6, (g, u) => { globe(g, u, 0, Math.min(1, u / .6)); }, '01.09.1939'],
+          [1.4, (g, u) => card(g, u, 'WAR FOOTING', 'ALL FORCES TO READINESS', 'blue'), '01.09.1939'],
+          [4.4, (g, u) => { theatreScene(g, u, TH.poland, RED_PAL); }, '01.09.1939'],
+          [.4, (g, u) => silFrame(g, u, 'Germany', false), '03.09.1939'],
+          [.4, (g, u) => silFrame(g, u, 'United Kingdom', true), '03.09.1939'],
+          [.4, (g, u) => silFrame(g, u, 'France', false), '03.09.1939'],
+          [.7, (g, u) => card(g, u, 'TOTAL WAR', '', 'red'), '03.09.1939'],
+          [2.2, (g, u) => { globe(g, 20, Math.min(1, u / 1.4), 1, RED_PAL); }, '22.06.1941'],
+          [2.9, (g, u) => endCard(g, u, RED_PAL), '--.--.----']
+        ],
+        // three campaigns, each with its date card, in Signal's lilac
+        theatres: () => [
+          [2.3, (g, u) => { globe(g, u, 0, Math.min(1, u / .6)); }, '01.09.1939'],
+          [1.2, (g, u) => card(g, u, '1 SEPTEMBER 1939', 'POLAND', 'blue'), '01.09.1939'],
+          [3.4, (g, u) => { theatreScene(g, u, TH.poland, LILAC_PAL); }, '01.09.1939'],
+          [1.2, (g, u) => card(g, u, '10 MAY 1940', 'THE LOW COUNTRIES AND FRANCE', 'blue'), '10.05.1940'],
+          [3.4, (g, u) => { theatreScene(g, u, TH.france, LILAC_PAL); }, '10.05.1940'],
+          [1.2, (g, u) => card(g, u, '8 DECEMBER 1941', 'MALAYA', 'blue'), '08.12.1941'],
+          [3.4, (g, u) => { theatreScene(g, u, TH.malaya, LILAC_PAL); }, '08.12.1941'],
+          [2.0, (g, u) => { globe(g, 20, Math.min(1, u / 1.4), 1); }, '08.12.1941'],
+          [2.9, (g, u) => endCard(g, u), '--.--.----']
+        ],
+        // War footing's hard cuts around an escalating readiness count
+        countdown: () => [
+          [1.3, (g, u) => typed(g, u, 'ALL STATIONS · ALL STATIONS', 1.0), '31.08.1939'],
+          [.8, (g, u) => card(g, u, 'DEFCON 5', '', 'black'), '31.08.1939'],
+          [.8, (g, u) => card(g, u, 'DEFCON 4', '', 'blue'), '31.08.1939'],
+          [.4, (g, u) => silFrame(g, u, 'Germany', false), '01.09.1939'],
+          [.4, (g, u) => silFrame(g, u, 'Poland', true), '01.09.1939'],
+          [.8, (g, u) => card(g, u, 'DEFCON 3', '', 'blue'), '01.09.1939'],
+          [.4, (g, u) => silFrame(g, u, 'USSR', false), '17.09.1939'],
+          [.4, (g, u) => silFrame(g, u, 'Japan', true), '17.09.1939'],
+          [.4, (g, u) => silFrame(g, u, 'United States', false), '17.09.1939'],
+          [.8, (g, u) => card(g, u, 'DEFCON 2', '', 'red'), '17.09.1939'],
+          [.7, (g, u) => { const on = Math.floor(u * 10) % 2 === 0; if (on) card(g, u, 'DEFCON 1', '', 'red'); return 1; }, '--.--.----'],
+          [2.2, (g, u) => { globe(g, 20, Math.min(1, u / 1.2), 1, RED_PAL); }, '--.--.----'],
+          [2.6, (g, u) => warEnd(g, u), '--.--.----']
+        ]
+      };
+
       function timecode(t) { const s = Math.floor(t); return `0:00:${String(s).padStart(2, '0')}`; }
       function stamp(t) {
         if (t < T.europe) return '01.09.1939';
@@ -334,29 +406,32 @@
     return out;
   }
 
-  // Europe in 1939: land, Germany, Poland province by province from the west, borders, Berlin and Warsaw
-  function europe(data, geo) {
-    const box = [geo.X(-6), geo.Y(60), geo.X(36), geo.Y(40)];
+  // A campaign on the 1939 map: land in a lon/lat box, the attacker hatched, the defender's provinces
+  // in the box ordered by distance from the attacker's capital (so they fall from the front inward),
+  // borders, and the two end points of the arc.
+  function theatre(data, geo, cfg) {
+    const [lo0, la0, lo1, la1] = cfg.box, box = [geo.X(lo0), geo.Y(la0), geo.X(lo1), geo.Y(la1)];
     const find = nm => data.nations.findIndex(n => n.name === nm);
-    const ger = find('Germany'), pol = find('Poland'); if (ger < 0 || pol < 0) return null;
+    const att = find(cfg.att), def = find(cfg.def); if (att < 0 || def < 0) return null;
     const owner = data.provinces.map(p => p.o);
-    const land = new Path2D(), gerP = new Path2D(), prov = new Path2D(), border = new Path2D(), polList = [];
-    const inBox = b => b[2] > box[0] - 40 && b[0] < box[2] + 40 && b[3] > box[1] - 40 && b[1] < box[3] + 40;
+    const land = new Path2D(), attP = new Path2D(), prov = new Path2D(), border = new Path2D(), defList = [];
+    const pad = 40, inBox = b => b[2] > box[0] - pad && b[0] < box[2] + pad && b[3] > box[1] - pad && b[1] < box[3] + pad;
+    const ac = geo.provs[data.nations[att].cap], dc = geo.provs[data.nations[def].cap];
+    const to = cfg.at ? [geo.X(cfg.at[0]), geo.Y(cfg.at[1])] : [dc.lx, dc.ly];
     geo.provs.forEach((p, i) => {
       if (!inBox(p.box)) return;
       land.addPath(p.path);
-      if (owner[i] === ger) gerP.addPath(p.path);
-      if (owner[i] === pol) polList.push([p.lx, p.path]);
+      if (owner[i] === att) attP.addPath(p.path);
+      if (owner[i] === def && (!cfg.near || Math.hypot(p.lx - to[0], p.ly - to[1]) < cfg.near)) defList.push([Math.hypot(p.lx - ac.lx, p.ly - ac.ly), p.path]);
     });
-    polList.sort((a, b) => a[0] - b[0]);
-    for (const k of geo.arcsIn(box[0] - 40, box[1] - 40, box[2] + 40, box[3] + 40)) {
+    defList.sort((a, b) => a[0] - b[0]);
+    for (const k of geo.arcsIn(box[0] - pad, box[1] - pad, box[2] + pad, box[3] + pad)) {
       const u = geo.users[k], a = geo.arcs[k], target = u.length < 2 || owner[u[0]] !== owner[u[1]] ? border : prov;
       target.moveTo(a[0], a[1]); for (let i = 2; i < a.length; i += 2) target.lineTo(a[i], a[i + 1]);
     }
-    const cap = n => { const c = data.nations[n].cap, p = geo.provs[c]; return [p.lx, p.ly]; };
-    let pat = null;
-    const hatch = g => { if (pat) return pat; const t = document.createElement('canvas'); t.width = t.height = 12; const x = t.getContext('2d'); x.strokeStyle = 'rgba(255,79,216,.95)'; x.lineWidth = 3; x.beginPath(); x.moveTo(-3, 15); x.lineTo(15, -3); x.moveTo(-3, 3); x.lineTo(3, -3); x.moveTo(9, 15); x.lineTo(15, 9); x.stroke(); pat = g.createPattern(t, 'repeat'); pat.setTransform && pat.setTransform(new DOMMatrix().scale(.06)); return pat; };
-    return { box, land, ger: gerP, pol: polList.map(x => x[1]), prov, border, from: cap(ger), to: cap(pol), hatch };
+    const pats = {};
+    const hatch = (g, rgb) => { if (pats[rgb]) return pats[rgb]; const t = document.createElement('canvas'); t.width = t.height = 12; const x = t.getContext('2d'); x.strokeStyle = `rgba(${rgb},.95)`; x.lineWidth = 3; x.beginPath(); x.moveTo(-3, 15); x.lineTo(15, -3); x.moveTo(-3, 3); x.lineTo(3, -3); x.moveTo(9, 15); x.lineTo(15, 9); x.stroke(); const pt = g.createPattern(t, 'repeat'); pt.setTransform && pt.setTransform(new DOMMatrix().scale(.06)); return (pats[rgb] = pt); };
+    return { box, land, ger: attP, pol: defList.map(x => x[1]), prov, border, from: [ac.lx, ac.ly], to, fromName: cfg.from, toName: cfg.to, hatch };
   }
 
   root.Intro = { play, seen() { try { return sessionStorage.getItem('imperium-intro') === '1'; } catch (e) { return false; } }, mark() { try { sessionStorage.setItem('imperium-intro', '1'); } catch (e) { /* storage unavailable */ } } };
