@@ -1,4 +1,4 @@
-/* Front Line: screens, panels and the real-time game loop. */
+/* Imperium: screens, panels and the real-time game loop. */
 (function () {
   'use strict';
   const W = World, $ = id => document.getElementById(id);
@@ -25,17 +25,21 @@
   // ================================================================ start screen
   function boot() {
     drawStartBg();
+    // the year table: one ruled row per period, with its nation count once the map has loaded
     const list = $('period-list');
     for (const pid of Object.keys(W.PERIODS)) {
-      const P = W.PERIODS[pid], b = document.createElement('button');
-      b.className = 'period';
-      b.innerHTML = `<canvas width="720" height="300"></canvas><div class="body"><div class="yr">${pid}</div><div class="nm">${P.title}</div><p>${P.blurb}</p></div>`;
-      b.onclick = () => openPick(pid);
-      list.appendChild(b);
-      loadData(pid).then(d => drawPreview(b.querySelector('canvas'), d, pid)).catch(() => {});
+      const P = W.PERIODS[pid], tr = document.createElement('tr');
+      tr.tabIndex = 0; tr.title = P.blurb;
+      tr.innerHTML = `<td class="yr">${pid}</td><td>${esc(P.title)}</td><td class="cnt"></td>`;
+      tr.onclick = () => openPick(pid);
+      tr.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPick(pid); } };
+      list.appendChild(tr);
+      loadData(pid).then(d => { tr.querySelector('.cnt').textContent = `${d.nations.length} nations`; }).catch(() => {});
     }
-    const saved = readSave();
-    if (saved) { $('continue-wrap').hidden = false; $('btn-continue').textContent = `Continue: ${saved.g.nations[saved.g.player].name}, ${W.dateLabel(saved.g)}`; }
+    $('btn-new').onclick = () => { $('start').classList.add('picking'); const r = list.querySelector('tr'); if (r) r.focus(); };
+    $('cab-back').onclick = () => $('start').classList.remove('picking');
+    $('btn-how').onclick = showHelp;
+    showContinue();
     $('btn-continue').onclick = continueGame;
     $('pick-back').onclick = () => show('start');
     $('pick-search').oninput = pickSearch;
@@ -46,16 +50,18 @@
     addEventListener('keydown', onKey);
     requestAnimationFrame(frame);
   }
-  function show(id) { for (const s of ['start', 'pick', 'game', 'battle']) $(s).hidden = s !== id; }
-  function drawStartBg() {
-    const cv = $('start-bg'), c = cv.getContext('2d'); cv.width = innerWidth; cv.height = innerHeight;
-    const gr = c.createRadialGradient(cv.width / 2, 0, 50, cv.width / 2, cv.height / 2, Math.max(cv.width, cv.height));
-    gr.addColorStop(0, '#17222e'); gr.addColorStop(1, '#07090c'); c.fillStyle = gr; c.fillRect(0, 0, cv.width, cv.height);
-    c.strokeStyle = 'rgba(120,150,180,.06)';
-    for (let x = 0; x < cv.width; x += 40) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, cv.height); c.stroke(); }
-    for (let y = 0; y < cv.height; y += 40) { c.beginPath(); c.moveTo(0, y); c.lineTo(cv.width, y); c.stroke(); }
+  function show(id) { for (const s of ['start', 'loading', 'pick', 'game', 'battle']) $(s).hidden = s !== id; if (id === 'start') $('start').classList.remove('picking'); }
+  function showContinue() {
+    const s = readSave(), b = $('btn-continue'), note = $('continue-note');
+    b.hidden = note.hidden = !s;
+    if (s) note.textContent = `${s.g.nations[s.g.player].name} · ${W.dateLabel(s.g)}`;
   }
-  function drawPreview(cv, d, pid) { WorldMap.renderPreview(cv, d, W.newGame(d, pid)); }
+  // the title screen sits on the real 1939 map, drawn in the game's own style
+  function drawStartBg() {
+    const cv = $('start-bg'); cv.width = Math.min(1600, innerWidth); cv.height = Math.round(cv.width * innerHeight / innerWidth);
+    const c = cv.getContext('2d'); c.fillStyle = '#0d0f11'; c.fillRect(0, 0, cv.width, cv.height);
+    loadData('1939').then(d => WorldMap.renderPreview(cv, d, W.newGame(d, '1939'))).catch(() => {});
+  }
   let pingTimer = 0;
   async function pingAI() {
     clearTimeout(pingTimer);
@@ -79,6 +85,8 @@
   // ================================================================ pick a nation
   async function openPick(pid) {
     period = pid;
+    const loaded = await Promise.race([loadData(pid).then(() => true, () => true), sleep(60).then(() => false)]);
+    if (!loaded) await surveyWhile(pid, loadData(pid));
     show('pick');
     $('pick-title').textContent = `${pid} · ${W.PERIODS[pid].title}`;
     $('pick-card').hidden = true; pickSel = -1; $('pick-search').value = ''; $('pick-results').hidden = true;
@@ -101,6 +109,21 @@
       c.onclick = () => { choosePick(i); pickMap.focus(n.cap, 2.2); };
       q.appendChild(c);
     });
+  }
+  // Loading: an aerial survey of the relief with a sighting reticle, shown while the map file downloads
+  async function surveyWhile(pid, job) {
+    show('loading'); $('survey-tag').textContent = `Survey · ${pid} · ${W.PERIODS[pid].title}`;
+    const steps = ['Receiving map sheets', 'Drawing provinces', 'Placing armies', 'Contacting foreign ministries'];
+    const dm = v => Math.floor(v) + '°' + String(Math.floor((v % 1) * 60)).padStart(2, '0') + '′';
+    const t0 = performance.now(); let done = false;
+    job.then(() => { done = true; }, () => { done = true; });
+    while (!done) {
+      const t = (performance.now() - t0) / 1000, q = 1 - Math.exp(-t / 2.5);
+      $('ld-prog').style.width = (q * 92).toFixed(1) + '%'; $('ld-step').textContent = steps[Math.min(3, Math.floor(t / 1.2))];
+      $('ld-lat').textContent = dm(48 + Math.sin(t * .7) * 4) + 'N'; $('ld-lon').textContent = dm(14 + Math.cos(t * .5) * 9) + 'E';
+      await sleep(80);
+    }
+    $('ld-prog').style.width = '100%'; await sleep(250);
   }
   function cloneCanvas(cv) { const n = document.createElement('canvas'); n.id = cv.id; return n; }
   function choosePick(i) {
@@ -699,7 +722,7 @@
     const box = $('toasts');
     const el = document.createElement('button'); el.className = 'toast news';
     const msgs = (entry.res.messages_to_player || []).length;
-    el.innerHTML = `<b>📰 ${esc(entry.headline)}</b><span>${esc(entry.date)}${msgs ? ` · ${msgs} message${msgs > 1 ? 's' : ''} for you` : ''} · tap to read</span>`;
+    el.innerHTML = `<div class="k">Press<span>${esc(entry.date)}</span></div><b>${esc(entry.headline)}</b><span>${msgs ? `${msgs} message${msgs > 1 ? 's' : ''} for you · ` : ''}tap to read</span>`;
     el.onclick = () => { el.remove(); report(entry); };
     box.appendChild(el);
     setTimeout(() => { el.classList.add('fade'); setTimeout(() => el.remove(), 500); }, 9000);
@@ -720,7 +743,32 @@
         <div class="acts"><button class="btn small" data-show="${b.id}">Show</button>${canCmd && window.Battle ? `<button class="btn small primary" data-cmd="${b.id}">Command</button>` : ''}</div></div>`;
     }).join('') + (mine.length > 4 ? `<div class="dim">+${mine.length - 4} more battles</div>` : '');
     box.querySelectorAll('[data-show]').forEach(b => b.onclick = () => { const t = g.battles.find(x => x.id === +b.dataset.show); if (t) map.focusAt(map.geo.X(t.x), map.geo.Y(t.y), Math.max(map.cam.z, 4)); });
-    box.querySelectorAll('[data-cmd]').forEach(b => b.onclick = () => commandBattle(+b.dataset.cmd));
+    box.querySelectorAll('[data-cmd]').forEach(b => b.onclick = () => engage(+b.dataset.cmd));
+  }
+  // Engagement: zoom to the battle, show the forces and odds, then command it or let it play out
+  function engage(id) {
+    const b = W.liveBattle(g, id), t = g.battles.find(x => x.id === id); if (!b || !t || busy) return;
+    const meAtt = b.attackers.some(a => a.n === g.player || W.allied(g, a.n, g.player));
+    const mine = meAtt ? b.attackers : b.defenders, theirs = meAtt ? b.defenders : b.attackers;
+    const sum = l => Math.round(l.reduce((s, a) => s + a.div, 0));
+    const ch = W.battleOdds(g, b).chance, my = meAtt ? ch : 1 - ch;
+    const dm = (v, pos, neg) => `${Math.floor(Math.abs(v))}°${String(Math.floor((Math.abs(v) % 1) * 60)).padStart(2, '0')}′${v >= 0 ? pos : neg}`;
+    engage.prev = { ...map.cam }; engage.speed = speed; setSpeed(0); clearSel();
+    map.focusAt(map.geo.X(t.x), map.geo.Y(t.y), Math.max(map.cam.z, 7));
+    $('e-name').textContent = `Battle of ${placeName(t)}`;
+    $('e-meta').textContent = `${sum(mine)} divisions against ${sum(theirs)} · you are ${meAtt ? 'attacking' : 'defending'}`;
+    $('e-odds').style.width = Math.round(my * 100) + '%';
+    $('e-oddtext').textContent = `Estimated odds ${Math.round(my * 100)} to ${100 - Math.round(my * 100)} ${my >= .5 ? 'in your favour' : 'against you'}`;
+    $('e-coord').innerHTML = `${dm(t.y, 'N', 'S')}  ${dm(t.x, 'E', 'W')}<br>DAY ${Math.floor(t.days) + 1} OF THE BATTLE`;
+    const canCmd = b.attackers.concat(b.defenders).some(a => a.n === g.player) && window.Battle;
+    $('e-cmd').hidden = !canCmd;
+    $('e-cmd').onclick = () => { closeEngage(true); commandBattle(id); };
+    $('e-auto').onclick = () => closeEngage();
+    setTimeout(() => { $('engage').hidden = false; (canCmd ? $('e-cmd') : $('e-auto')).focus(); }, 450);
+  }
+  function closeEngage(keep) {
+    $('engage').hidden = true;
+    if (!keep && engage.prev) { map.cam.z = engage.prev.z; map.cam.x = engage.prev.x; map.cam.y = engage.prev.y; map.clamp && map.clamp(); setSpeed(engage.speed || 0); }
   }
   async function commandBattle(id) {
     const b = W.liveBattle(g, id); if (!b || busy) return;
@@ -752,24 +800,26 @@
     store.del(SAVE);
     sheet(`<h2>${esc(g.nations[g.player].name)} has fallen</h2><p>Your nation no longer holds any land. History will remember its last stand in ${esc(W.dateLabel(g))}.</p>
       <div class="acts"><button class="btn primary" id="go-new">New game</button></div>`);
-    $('go-new').onclick = () => { closeSheet(); gameOver.shown = false; g = null; show('start'); $('continue-wrap').hidden = true; };
+    $('go-new').onclick = () => { closeSheet(); gameOver.shown = false; g = null; show('start'); showContinue(); };
   }
 
   // ================================================================ menus and help
   function showMenu() {
-    sheet(`<h2>Menu</h2><p>${esc(g.nations[g.player].name)}, ${esc(W.dayLabel(g))}. Your game saves automatically every month.</p>
-      <div class="acts" style="flex-direction:column">
-        <button class="btn primary" data-a="close">Resume</button>
-        <button class="btn" data-a="help">How to play</button>
-        <button class="btn" data-a="symbols">What the symbols mean</button>
-        <button class="btn ghost" data-a="quit">Back to title screen</button>
-      </div>`);
+    sheet(`<h2>Paused</h2>
+      <ul class="pause-list">
+        <li><button data-a="close">Resume <span>Esc</span></button></li>
+        <li><button data-a="help">How to play <span>?</span></button></li>
+        <li><button data-a="symbols">What the symbols mean</button></li>
+        <li><button data-a="quit">Save and quit</button></li>
+      </ul>
+      <p class="pause-meta">${esc(g.nations[g.player].name)} · ${esc(W.dayLabel(g))} · saves every month</p>`, 'pause');
+    setTimeout(() => { const b = $('sheet').querySelector('[data-a=close]'); if (b) b.focus(); }, 30);
     $('sheet').querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
       const a = b.dataset.a;
       if (a === 'close') closeSheet();
       if (a === 'help') showHelp();
       if (a === 'symbols') showSymbols();
-      if (a === 'quit') { saveGame(); closeSheet(); setSpeed(0); g = null; show('start'); const s = readSave(); if (s) { $('continue-wrap').hidden = false; $('btn-continue').textContent = `Continue: ${s.g.nations[s.g.player].name}, ${W.dateLabel(s.g)}`; } }
+      if (a === 'quit') { saveGame(); closeSheet(); setSpeed(0); g = null; show('start'); showContinue(); }
     });
   }
   function showHelp() {
@@ -813,15 +863,19 @@
 
   function waiting(title, text) { return `<div class="waiting"><div class="spinner"></div><b>${esc(title)}</b><p>${esc(text)}</p></div>`; }
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  // Dispatches: a category, the in-game date, and the message
+  const KIND = { good: 'Report', bad: 'Alert', info: 'Notice' };
   function toast(text, kind, ms) {
     const box = $('toasts');
-    while (box.children.length >= 3) box.firstChild.remove();
-    const el = document.createElement('div'); el.className = 'toast ' + (kind || ''); el.textContent = text; box.appendChild(el);
+    while (box.children.length >= 4) box.firstChild.remove();
+    const el = document.createElement('div'); el.className = 'toast ' + (kind || '');
+    el.innerHTML = `<div class="k">${KIND[kind] || 'Notice'}<span>${g ? esc(W.dayLabel(g)) : ''}</span></div><b>${esc(text)}</b>`;
+    box.appendChild(el);
     setTimeout(() => { el.classList.add('fade'); setTimeout(() => el.remove(), 500); }, ms || 3800);
   }
   function onKey(e) {
     if ($('game').hidden || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
-    if (e.key === 'Escape') { if (!$('overlay').hidden && !busy) closeSheet(); else clearSel(); }
+    if (e.key === 'Escape') { if (!$('engage').hidden) { closeEngage(); return; } if (!$('overlay').hidden && !busy) closeSheet(); else if (sel.armies.length || sel.prov >= 0) clearSel(); else if (!busy) showMenu(); return; }
     if (busy || !$('overlay').hidden) return;
     if (e.key === ' ') { e.preventDefault(); setSpeed(speed ? 0 : lastSpeed); }
     if (e.key === '1' || e.key === '2' || e.key === '3') setSpeed(+e.key);
@@ -831,7 +885,7 @@
     if (!$('game').hidden && map && g) { tick(now); afterTick(now); map.draw(now); }
     else if (!$('pick').hidden && pickMap) pickMap.draw(now);
   }
-  window.FrontLine = { get state() { return g; }, get data() { return data; }, get map() { return map; },   // handy for debugging in the console
+  window.Imperium = window.FrontLine = { get state() { return g; }, get data() { return data; }, get map() { return map; },   // handy for debugging in the console
     advance(sec) {   // drive the clock manually (background tabs throttle rAF)
       const now = performance.now();
       for (let i = 0; i < (sec || 1) * 60; i++) { const t = now + i * 16.7; tick(t); afterTick(t); }

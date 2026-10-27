@@ -188,7 +188,7 @@
     const sc = env.s0 * 2 ** job.L, tw = TS / sc;
     const x0 = job.tx * tw, y0 = job.ty * tw, x1 = x0 + tw, y1 = y0 + tw;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#1a2c3d'; ctx.fillRect(0, 0, TS, TS);
+    ctx.fillStyle = '#e4eaeb'; ctx.fillRect(0, 0, TS, TS);
     ctx.setTransform(sc, 0, 0, sc, -x0 * sc, -y0 * sc);
     const img = env.relief;
     if (img && img.complete !== false && (img.naturalWidth || img.width)) {
@@ -198,19 +198,23 @@
       if (rx1 > rx0 && ry1 > ry0) {
         // fade the relief out as it is stretched past what the picture can show: political colour and borders take over
         const over = sc / job.dpr / (iw / geo.W);
-        const alpha = over <= 1.6 ? 1 : Math.max(0.22, 1 - (over - 1.6) / 4);
-        ctx.globalAlpha = alpha;
+        const alpha = over <= 1.6 ? 1 : Math.max(0.5, 1 - (over - 1.6) / 5);
+        // the relief keeps only its light and shade, tinted a pale grey-blue: colour comes from the nations
+        ctx.globalAlpha = alpha; ctx.globalCompositeOperation = 'luminosity';
         ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'medium';
         ctx.drawImage(img, rx0 * kx, ry0 * ky, (rx1 - rx0) * kx, (ry1 - ry0) * ky, rx0, ry0, rx1 - rx0, ry1 - ry0);
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(x0, y0, tw, tw);
+        ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = 'rgba(160,184,194,0.4)'; ctx.fillRect(x0, y0, tw, tw);
+        ctx.globalCompositeOperation = 'source-over';
       }
     }
     const pad = 1 / sc;
     const ids = geo.provsIn(x0 - pad, y0 - pad, x1 + pad, y1 + pad);
-    // deepen the sea so land stands out
+    // plain white sea so the land reads on its own
     const sea = new Path2D(); sea.rect(x0 - pad, y0 - pad, tw + 2 * pad, tw + 2 * pad);
     for (const i of ids) sea.addPath(geo.provs[i].path);
-    ctx.fillStyle = 'rgba(12,28,46,0.5)'; ctx.fill(sea, 'evenodd');
+    ctx.fillStyle = '#ffffff'; ctx.fill(sea, 'evenodd');
     // nation colours over the terrain; occupied land striped in the occupier's colour
     const byOwner = new Map(), occ = new Map();
     for (const i of ids) {
@@ -219,9 +223,10 @@
       const ct = ST.ctrl[i];
       if (ct >= 0 && ct !== o) { let q = occ.get(ct); if (!q) occ.set(ct, q = new Path2D()); q.addPath(geo.provs[i].path); }
     }
-    ctx.globalAlpha = 0.58;
+    // multiplied over the relief, so mountains and valleys show through the colour
+    ctx.globalAlpha = 0.6; ctx.globalCompositeOperation = 'multiply';
     for (const [o, p] of byOwner) { ctx.fillStyle = ST.colors[o]; ctx.fill(p); }
-    ctx.globalAlpha = 0.85;
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 0.85;
     for (const [o, p] of occ) { ctx.fillStyle = stripes(ctx, ST.colors[o], sc / job.dpr); ctx.fill(p); }
     ctx.globalAlpha = 1;
     // borders by kind
@@ -237,17 +242,13 @@
     // widths in screen px; tiles are shown at 50-100% of their native size, so draw lines a bit heavier
     const z = sc / job.dpr, px = w => w * 1.3 / z;
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    if (z > 0.9 && prov.length) { ctx.strokeStyle = `rgba(20,16,10,${Math.min(0.45, (z - 0.9) * 0.4)})`; ctx.lineWidth = px(0.8); ctx.stroke(arcPath(geo, prov)); }
-    if (coast.length) { ctx.strokeStyle = 'rgba(15,25,35,0.75)'; ctx.lineWidth = px(1); ctx.stroke(arcPath(geo, coast)); }
-    if (nation.length) {
-      const p = arcPath(geo, nation);
-      ctx.strokeStyle = 'rgba(18,12,8,0.9)'; ctx.lineWidth = px(Math.max(1.4, Math.min(3.2, z * 0.9))); ctx.stroke(p);
-      ctx.strokeStyle = 'rgba(255,240,220,0.22)'; ctx.lineWidth = px(0.6); ctx.stroke(p);
-    }
+    if (z > 0.9 && prov.length) { ctx.strokeStyle = `rgba(40,50,55,${Math.min(0.28, (z - 0.9) * 0.25)})`; ctx.lineWidth = px(0.7); ctx.stroke(arcPath(geo, prov)); }
+    if (coast.length) { ctx.strokeStyle = 'rgba(95,120,132,0.85)'; ctx.lineWidth = px(0.9); ctx.stroke(arcPath(geo, coast)); }
+    if (nation.length) { ctx.strokeStyle = 'rgba(62,72,78,0.85)'; ctx.lineWidth = px(Math.max(1, Math.min(2.2, z * 0.6))); ctx.stroke(arcPath(geo, nation)); }
     if (front.length && job.front) {
       const p = arcPath(geo, front);
-      ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.lineWidth = px(4.5); ctx.stroke(p);
-      ctx.strokeStyle = '#ff5145'; ctx.lineWidth = px(2.6); ctx.stroke(p);
+      ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = px(4.5); ctx.stroke(p);
+      ctx.strokeStyle = '#b8322c'; ctx.lineWidth = px(2.4); ctx.stroke(p);
     }
   }
   function workerSource() {
@@ -727,7 +728,7 @@ onmessage = (e) => {
     }
 
     // ---------------------------------------------------------------- labels (drawn every frame, on top of the tiles)
-    textWidth(c, s) { let w = this.textW.get(s); if (w == null) { c.font = '500 10px "Source Serif 4", Georgia, serif'; w = c.measureText(s).width / 10; this.textW.set(s, w); } return w; }
+    textWidth(c, s) { let w = this.textW.get(s); if (w == null) { c.font = '500 10px Montserrat, "Helvetica Neue", Arial, sans-serif'; w = c.measureText(s).width / 10; this.textW.set(s, w); } return w; }
     // A pre-rendered capital star (there can be 170+ of them on screen, every frame).
     starSprite(R, r) {
       const qr = Math.round(R * 2) / 2, qi = Math.round(r * 2) / 2, key = qr + '/' + qi;
@@ -789,8 +790,8 @@ onmessage = (e) => {
       // province names when zoomed in
       if (z > 3.2) {
         const fs = Math.min(15, 6 + z * 0.9);
-        c.font = `500 ${fs}px "Source Serif 4", Georgia, serif`;
-        c.lineWidth = 2.5; c.strokeStyle = 'rgba(255,250,240,0.55)'; c.fillStyle = 'rgba(30,24,16,0.85)';
+        c.font = `500 ${fs}px Montserrat, "Helvetica Neue", Arial, sans-serif`;
+        c.lineJoin = 'round'; c.lineWidth = 2; c.strokeStyle = 'rgba(255,255,255,0.5)'; c.fillStyle = 'rgba(47,52,55,0.85)';
         for (const i of geo.provsIn(x0, y0, x1, y1)) {
           const pr = geo.provs[i], name = data.provinces[i].n;
           if ((pr.box[2] - pr.box[0]) * z < this.textWidth(c, name) * fs * 0.9) continue;
@@ -829,10 +830,10 @@ onmessage = (e) => {
         if (!box) continue;
         placed.push(box);
         c.save(); c.translate(x, y); c.rotate(L.ang);
-        c.font = `600 ${fs}px "Source Serif 4", Georgia, serif`;
-        if ('letterSpacing' in c) c.letterSpacing = `${Math.round(fs * 0.18)}px`;
-        c.lineWidth = Math.max(2, fs / 7); c.strokeStyle = 'rgba(20,14,8,0.55)'; c.strokeText(name, 0, 0);
-        c.fillStyle = 'rgba(255,248,232,0.92)'; c.fillText(name, 0, 0);
+        c.font = `700 ${fs}px Montserrat, "Helvetica Neue", Arial, sans-serif`;
+        if ('letterSpacing' in c) c.letterSpacing = `${Math.round(fs * 0.08)}px`;
+        c.lineJoin = 'round'; c.lineWidth = Math.max(2, fs / 6); c.strokeStyle = 'rgba(255,255,255,0.6)'; c.strokeText(name, 0, 0);
+        c.fillStyle = 'rgba(47,52,55,0.92)'; c.fillText(name, 0, 0);
         if ('letterSpacing' in c) c.letterSpacing = '0px';
         c.restore();
       }
@@ -876,7 +877,7 @@ onmessage = (e) => {
       const { ctx, cam, geo } = this, z = cam.z;
       this.drawnVer = this.version; this.drawnCam = { x: cam.x, y: cam.y, z: cam.z };
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = '#1a2c3d'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
       this.drawTiles(ctx, now);
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.drawLabels(ctx, now);
@@ -1057,12 +1058,16 @@ onmessage = (e) => {
   function renderPreview(cv, data, state) {
     const geo = prepare(data), c = cv.getContext('2d');
     const s = Math.max(cv.width / geo.W, cv.height / geo.H);
-    c.fillStyle = '#16283a'; c.fillRect(0, 0, cv.width, cv.height);
+    c.fillStyle = '#ffffff'; c.fillRect(0, 0, cv.width, cv.height);
     c.save(); c.translate((cv.width - geo.W * s) / 2, (cv.height - geo.H * s) / 2 - 8); c.scale(s, s);
-    const img = relief(); if (img.complete && img.naturalWidth) c.drawImage(img, 0, 0, geo.W, geo.H);
-    c.globalAlpha = 0.62;
-    state.owner.forEach((o, i) => { if (o >= 0) { c.fillStyle = state.nations[o].color; c.fill(geo.provs[i].path); } });
-    c.globalAlpha = 1;
+    const land = new Path2D(); state.owner.forEach((o, i) => land.addPath(geo.provs[i].path));
+    c.save(); c.clip(land); c.fillStyle = '#e4eaeb'; c.fillRect(0, 0, geo.W, geo.H);
+    const img = relief(); if (img.complete && img.naturalWidth) { c.globalCompositeOperation = 'luminosity'; c.drawImage(img, 0, 0, geo.W, geo.H); c.globalCompositeOperation = 'source-over'; c.fillStyle = 'rgba(255,255,255,0.18)'; c.fillRect(0, 0, geo.W, geo.H); }
+    // one path per nation, so shared province edges are not coloured twice
+    const byOwner = new Map(); state.owner.forEach((o, i) => { if (o < 0) return; let p = byOwner.get(o); if (!p) byOwner.set(o, p = new Path2D()); p.addPath(geo.provs[i].path); });
+    c.globalAlpha = 0.6; c.globalCompositeOperation = 'multiply';
+    for (const [o, p] of byOwner) { c.fillStyle = state.nations[o].color; c.fill(p); }
+    c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.restore();
     c.restore();
     if (!img.complete) img.addEventListener('load', () => renderPreview(cv, data, state), { once: true });
   }

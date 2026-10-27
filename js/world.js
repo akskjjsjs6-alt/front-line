@@ -1,4 +1,4 @@
-/* Front Line world simulation: nations, provinces, armies, wars, in real time. No DOM. */
+/* Imperium world simulation: nations, provinces, armies, wars, in real time. No DOM. */
 (function (root) {
   'use strict';
 

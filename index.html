@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
-<title>Front Line</title>
+<title>Imperium</title>
 <meta name="description" content="An open-world grand strategy game. Lead any nation in 1900, 1939 or 2003. An AI plays every other nation, and you can fight battles yourself with NATO unit symbols.">
-<meta name="theme-color" content="#0b0f14">
+<meta name="theme-color" content="#0d0f11">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 30 20%22%3E%3Crect x=%221%22 y=%221%22 width=%2228%22 height=%2218%22 fill=%22%2380e0ff%22 stroke=%22%23000%22 stroke-width=%222%22/%3E%3Cpath d=%22M1 1L29 19M29 1L1 19%22 stroke=%22%23000%22 stroke-width=%222%22/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Montserrat:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=Spectral:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap">
 <link rel="stylesheet" href="style.css?v=19">
 </head>
 <body>
@@ -17,18 +17,30 @@
 <!-- ============ START ============ -->
 <section id="start" class="screen">
   <canvas id="start-bg"></canvas>
-  <div class="start-inner">
-    <header class="title">
-      <div class="kicker">Grand strategy · alternate history</div>
-      <h1>FRONT<span>LINE</span></h1>
-      <p class="sub">Lead any nation. Every other country is played by an AI that writes back.</p>
-      <p class="sub" id="build-tag" style="margin-top:6px;font-size:12px;letter-spacing:1px;opacity:.8">BUILD v19 — cleaner names, Yugoslavia 2003</p>
-    </header>
-    <div id="continue-wrap" hidden><button id="btn-continue" class="btn primary wide"></button></div>
-    <h2 class="step"><b>1</b> Pick a year</h2>
-    <div id="period-list" class="period-list"></div>
+  <div class="quiet" id="start-quiet">
+    <h1>IMPERIUM</h1>
+    <nav class="title-menu">
+      <button type="button" id="btn-new" class="on">New game</button>
+      <button type="button" id="btn-continue" hidden>Continue</button>
+      <button type="button" id="btn-how">How to play</button>
+    </nav>
+    <p id="continue-note" class="continue-note" hidden></p>
+  </div>
+  <div class="cabinet" id="start-cabinet" aria-label="Choose a year">
+    <button type="button" class="back" id="cab-back">← Back</button>
+    <h2>IMPERIUM</h2>
+    <p class="cab-sub">Choose a year. Then choose any nation to lead.</p>
+    <table id="period-list" class="period-table"></table>
     <p id="ai-status" class="ai-status"></p>
   </div>
+</section>
+
+<!-- ============ LOADING ============ -->
+<section id="loading" class="screen" hidden>
+  <div class="survey" id="survey"></div>
+  <div class="reticle"></div>
+  <div class="survey-tag" id="survey-tag">Survey · 1939</div>
+  <div class="survey-read"><span>LAT <b id="ld-lat">52°13′N</b>&nbsp;&nbsp;LON <b id="ld-lon">21°00′E</b></span><span id="ld-step">Receiving map sheets</span><div class="ld-prog"><i id="ld-prog"></i></div></div>
 </section>
 
 <!-- ============ PICK A NATION ============ -->
@@ -48,7 +60,7 @@
 <!-- ============ GAME ============ -->
 <section id="game" class="screen" hidden>
   <header class="bar" id="hud">
-    <button class="icon-btn" id="btn-menu" title="Menu">☰</button>
+    <button class="icon-btn" id="btn-menu" title="Menu (Esc)">☰</button>
     <div class="nation-chip"><i id="hud-color"></i><div><b id="hud-name"></b><span id="hud-date"></span></div></div>
     <div class="stat" title="Treasury. Earned each month from your economy and land."><span class="lbl">Treasury</span><b id="hud-money"></b></div>
     <div class="stat" title="Total divisions in your armies."><span class="lbl">Army</span><b id="hud-div"></b></div>
@@ -59,6 +71,9 @@
   <div class="stage">
     <canvas id="map"></canvas>
     <div id="toasts"></div>
+    <div id="engage" hidden><div class="hair"></div><div class="box"></div><div class="coord" id="e-coord"></div>
+      <div class="card"><div class="kick">Engagement</div><b id="e-name"></b><div class="m" id="e-meta"></div><div class="oddsbar"><i id="e-odds"></i></div><div class="m" id="e-oddtext"></div>
+        <div class="acts"><button class="btn primary" id="e-cmd">Command the battle</button><button class="btn" id="e-auto">Let it play out</button></div></div></div>
     <div id="tooltip" hidden></div>
     <aside id="sel-card" class="card" hidden></aside>
     <div id="mode-hint" class="mode-hint" hidden></div>

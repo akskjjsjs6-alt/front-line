@@ -1,4 +1,4 @@
-# Front Line
+# Imperium
 
 An open-world grand strategy game in the browser. Pick a year (1900, 1939 or 2003), pick **any nation**, and play
 in real time (pause and three speeds, like Hearts of Iron) while an AI game master runs every other country.
