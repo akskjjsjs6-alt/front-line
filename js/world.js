@@ -11,12 +11,13 @@
   const RAJ = PRINCELY.map(n => ['United Kingdom', n]);
   const PERIODS = {
     '1900': {
-      id: '1900', file: 'data/world-1900.json?v=6', start: [1900, 1], title: 'The Age of Empires', speed: 14, recruitCost: 6,
+      id: '1900', file: 'data/world-1900.json?v=7', start: [1900, 1], title: 'The Age of Empires', speed: 14, recruitCost: 6,
       blurb: 'Queen Victoria still reigns. Europe\'s empires cover the globe, the Boer War rages and China simmers. Fourteen years of peace remain, unless someone breaks it sooner.',
       units: { inf: 0.7, recon: 0.2, art: 0.1 },
       wars: [['United Kingdom', 'Transvaal'], ['United Kingdom', 'Orange Free State']],
       alliances: [...RAJ, ['France', 'Russia'], ['Germany', 'Austria-Hungary'], ['Germany', 'Italy'], ['Austria-Hungary', 'Italy'], ['Transvaal', 'Orange Free State']],
-      hostile: [['France', 'Germany', -45], ['Russia', 'Japan', -40], ['United Kingdom', 'Russia', -25], ['Austria-Hungary', 'Serbia', -30], ['Russia', 'Ottoman Empire', -35], ['United Kingdom', 'France', -15]]
+      hostile: [['France', 'Germany', -45], ['Russia', 'Japan', -40], ['United Kingdom', 'Russia', -25], ['Austria-Hungary', 'Serbia', -30], ['Russia', 'Ottoman Empire', -35], ['United Kingdom', 'France', -15],
+        ['Al Saud', 'Jabal Shammar', -70], ['Ottoman Empire', 'Jabal Shammar', 30]]
     },
     '1939': {
       id: '1939', file: 'data/world-1939.json?v=6', start: [1939, 3], title: 'The Gathering Storm', speed: 22, recruitCost: 8,
@@ -69,6 +70,8 @@
       'Transvaal': [5, 1.05, 30, 'Boer republic', 'President Paul Kruger'],
       'Orange Free State': [3, 1.0, 20, 'Boer republic', 'President Martinus Steyn'],
       'Afghanistan': [5, 0.6, 15, 'Emirate', 'Emir Abdur Rahman Khan'],
+      'Jabal Shammar': [4, 0.5, 15, 'Emirate (Ottoman-aligned)', 'Emir Abdulaziz bin Mutaib Al Rashid'],
+      'Al Saud': [2, 0.5, 8, 'Emirate (in exile in Kuwait)', 'Imam Abdul Rahman bin Faisal (Ibn Saud)'],
       'Sweden-Norway': [8, 0.95, 55, 'Union of crowns', 'King Oscar II'],
       'Denmark': [4, 0.9, 55, 'Constitutional monarchy', 'King Christian IX'],
       'Argentina': [8, 0.75, 45, 'Republic', 'President Julio Roca'],
@@ -220,7 +223,8 @@
     'Canada': '#bb8e92', 'Australia': '#82a0ba', 'India': '#cfb79d', 'Iraq': '#a0b18c', 'Iran': '#8bb1a5', 'Turkey': '#b38991', 'Sweden': '#8ea7c2',
     'Sweden-Norway': '#8ea7c2', 'Persia': '#8bb1a5', 'Mexico': '#9bb389', 'Argentina': '#aec3d6', 'Czechoslovakia': '#94a7bc', 'Hungary': '#b39e89',
     'Romania': '#c4b98c', 'Yugoslavia': '#a49ebb', 'Finland': '#b5becf', 'Egypt': '#c8bca1', 'Saudi Arabia': '#90b28a', 'Israel': '#aec0d5',
-    'South Korea': '#a6b5cd', 'North Korea': '#b48888', 'Pakistan': '#8bb294', 'Ukraine': '#cdc49a', 'Mongolia': '#ae9d8e', 'Ethiopia': '#a9b588'
+    'South Korea': '#a6b5cd', 'North Korea': '#b48888', 'Pakistan': '#8bb294', 'Ukraine': '#cdc49a', 'Mongolia': '#ae9d8e', 'Ethiopia': '#a9b588',
+    'Jabal Shammar': '#c9ae94', 'Al Saud': '#8fb59a'
   };
 
   // ------------------------------------------------------------------ helpers
@@ -985,7 +989,7 @@
   // ------------------------------------------------------------------ the historical timeline
   // What actually happened. AI nations tend to follow it unless the world has changed too much.
   const TIMELINE = {
-    '1900': [[1904, 2, 'war', 'Japan', 'Russia', 'Russo-Japanese War'], [1905, 9, 'peace', 'Japan', 'Russia', 'Treaty of Portsmouth'],
+    '1900': [[1901, 3, 'war', 'Al Saud', 'Jabal Shammar', 'The Saudi-Rashidi war'], [1904, 2, 'war', 'Japan', 'Russia', 'Russo-Japanese War'], [1905, 9, 'peace', 'Japan', 'Russia', 'Treaty of Portsmouth'],
       [1911, 9, 'war', 'Italy', 'Ottoman Empire', 'Italo-Turkish War'], [1912, 10, 'war', 'Bulgaria', 'Ottoman Empire', 'First Balkan War'],
       [1912, 10, 'war', 'Serbia', 'Ottoman Empire', 'First Balkan War'], [1912, 10, 'war', 'Greece', 'Ottoman Empire', 'First Balkan War'],
       [1914, 7, 'war', 'Austria-Hungary', 'Serbia', 'The July Crisis'], [1914, 8, 'war', 'Germany', 'Russia', 'The Great War'],
