@@ -52,7 +52,7 @@
     // the opening sequence, once per session (?intro=signal|war|neon picks the cut and always plays)
     const want = new URLSearchParams(location.search).get('intro');
     const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (window.Intro && want !== 'off' && (want || (!Intro.seen() && !still))) { Intro.mark(); Intro.play(loadData('1939'), want).then(() => { const b = $('btn-new'); if (b) b.focus(); }); }
+    if (window.Intro && want !== 'off' && (want || (!Intro.seen() && !still))) { Intro.mark(); Intro.play(loadData('1939'), want, loadData).then(() => { const b = $('btn-new'); if (b) b.focus(); }); }
   }
   function show(id) { for (const s of ['start', 'loading', 'pick', 'game', 'battle']) $(s).hidden = s !== id; if (id === 'start') $('start').classList.remove('picking'); }
   function showContinue() {

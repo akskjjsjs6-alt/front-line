@@ -3,6 +3,7 @@
    war    - hard red/black/white cuts: typed date, nation silhouettes, one-word cards, a red globe
    neon   - colour-cycling nation shapes beside stacked, repeated lettering
    strike, theatres, countdown - remixes of the first two, built from the shared scenes below
+   eras, century - the same two looks across all three periods, using the 1900 and 2003 maps too
    Plays once per browser session; any key, click or "Skip" ends it. */
 (function (root) {
   'use strict';
@@ -13,15 +14,17 @@
   const T = { globe: 0, card1: 3.4, europe: 5.0, rapid: 9.8, fire: 11.3, end: 13.7, out: 16.6 };
   const RAPID = ['MOBILISE', 'DECLARE', 'CONQUER'];
 
-  const DUR = { signal: T.out, war: 12.4, neon: 11.2, strike: 0, theatres: 0, countdown: 0 };
-  function play(dataPromise, style) {
+  const DUR = { signal: T.out, war: 12.4, neon: 11.2, strike: 0, theatres: 0, countdown: 0, eras: 0, century: 0 };
+  const ALL_PERIODS = { eras: 1, century: 1 };
+  // dataPromise is the 1939 map; load(pid) fetches another period's map for the cuts that span all three
+  function play(dataPromise, style, load) {
     style = style in DUR ? style : 'signal';
     return new Promise(resolve => {
       const box = document.getElementById('intro'), cv = document.getElementById('intro-cv');
       const tc = document.getElementById('intro-tc'), date = document.getElementById('intro-date');
       const c = cv.getContext('2d'), buf = document.createElement('canvas'), b = buf.getContext('2d');
       let W = 0, H = 0, dpr = 1, geo = null, data = null, t0 = 0, raf = 0, done = false;
-      let lines = null, euro = null, shapes = null, TH = null, seq = null;
+      let lines = null, euro = null, shapes = null, TH = null, seq = null, SH = {};
 
       function size() {
         dpr = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight;
@@ -40,21 +43,47 @@
       addEventListener('keydown', key); addEventListener('resize', size);
       box.hidden = false; size();
 
-      dataPromise.then(d => {
+      const others = ALL_PERIODS[style] && load ? Promise.all([load('1900'), load('2003')]) : Promise.resolve([]);
+      // until the maps arrive this is a plain loading screen: the name, a typed status line, a bar per map
+      const parts = [dataPromise].concat(ALL_PERIODS[style] && load ? [load('1900'), load('2003')] : []);
+      let got = 0; parts.forEach(pr => pr.then(() => { got++; }, () => {}));
+      const tw = performance.now();
+      (function wait(now) {
+        if (t0 || done) return;
+        const u = (now - tw) / 1000;
+        b.setTransform(dpr, 0, 0, dpr, 0, 0); b.fillStyle = '#05040a'; b.fillRect(0, 0, W, H);
+        b.textAlign = 'center'; b.textBaseline = 'middle'; b.fillStyle = 'rgba(225,212,255,.9)';
+        b.font = `300 ${Math.min(42, W / 16)}px "Spectral", Georgia, serif`; if ('letterSpacing' in b) b.letterSpacing = '18px';
+        b.fillText('IMPERIUM', W / 2 + 9, H / 2 - 30); if ('letterSpacing' in b) b.letterSpacing = '0px';
+        const msg = 'RECEIVING MAP SHEETS', n = Math.min(msg.length, Math.floor(u * 18));
+        b.font = '500 12px "IBM Plex Mono", monospace'; b.fillStyle = 'rgba(255,255,255,.75)';
+        b.fillText(msg.slice(0, n) + (Math.floor(u * 4) % 2 ? '_' : ' ') + `  ${got}/${parts.length}`, W / 2, H / 2 + 14);
+        const bw = Math.min(260, W * .5), q = Math.min(1, (got + Math.min(.9, u / 3)) / parts.length);
+        b.fillStyle = 'rgba(201,178,255,.2)'; b.fillRect(W / 2 - bw / 2, H / 2 + 34, bw, 1);
+        b.fillStyle = 'rgba(255,79,216,.9)'; b.fillRect(W / 2 - bw / 2, H / 2 + 34, bw * q, 1);
+        composite(Math.random() < .05 ? .5 : 0); tc.textContent = timecode(u); date.textContent = '';
+        requestAnimationFrame(wait);
+      })(tw);
+      Promise.all([dataPromise, others]).then(([d, [d1900, d2003]]) => {
         data = d; geo = root.WorldMap.prepare(d);
-        lines = coastLines(geo); shapes = nationShapes(d, geo);
+        lines = coastLines(geo); shapes = nationShapes(d, geo); SH['1939'] = shapes;
+        const g1900 = d1900 && root.WorldMap.prepare(d1900), g2003 = d2003 && root.WorldMap.prepare(d2003);
+        if (d1900) SH['1900'] = nationShapes(d1900, g1900);
+        if (d2003) SH['2003'] = nationShapes(d2003, g2003);
         TH = {
           poland: theatre(d, geo, { box: [-6, 60, 36, 40], att: 'Germany', def: 'Poland', from: 'BERLIN', to: 'WARSAW' }),
           france: theatre(d, geo, { box: [-8, 57, 22, 40], att: 'Germany', def: 'France', from: 'BERLIN', to: 'PARIS', near: 900 }),
-          malaya: theatre(d, geo, { box: [92, 40, 146, -12], att: 'Japan', def: 'United Kingdom', from: 'TOKYO', to: 'SINGAPORE', at: [103.8, 1.35], near: 600 })
+          malaya: theatre(d, geo, { box: [92, 40, 146, -12], att: 'Japan', def: 'United Kingdom', from: 'TOKYO', to: 'SINGAPORE', at: [103.8, 1.35], near: 600 }),
+          boer: d1900 && theatre(d1900, g1900, { box: [8, -14, 42, -36], att: 'United Kingdom', def: 'Transvaal', from: 'CAPE TOWN', fromAt: [18.4, -33.9], to: 'PRETORIA', at: [28.2, -25.7] }),
+          iraq: d2003 && theatre(d2003, g2003, { box: [34, 40, 56, 26], att: 'Kuwait', def: 'Iraq', from: 'KUWAIT', to: 'BAGHDAD', at: [44.4, 33.3] })
         };
         euro = TH.poland;
         seq = SEQS[style] ? SEQS[style]() : null; if (seq) DUR[style] = seq.reduce((a, x) => a + x[0], 0);
         box.dataset.style = style;
         t0 = performance.now(); raf = requestAnimationFrame(frame);
       }, finish);
-      // if the map never arrives, do not hold the player hostage
-      setTimeout(() => { if (!t0) finish(); }, 12000);
+      // if the maps never arrive, do not hold the player hostage
+      setTimeout(() => { if (!t0) finish(); }, 20000);
 
       function frame(now) {
         if (done) return;
@@ -295,8 +324,8 @@
         return u < .06 ? 1 : 0;
       }
       // a nation's home territory, fitted into a screen box
-      function silhouette(g, nm, rect, fill, stroke, inner) {
-        const S = shapes && shapes[nm]; if (!S) return;
+      function silhouette(g, nm, rect, fill, stroke, inner, period) {
+        const S = (SH[period || '1939'] || shapes || {})[nm]; if (!S) return;
         const [x, y, w, h] = rect, bw = S.box[2] - S.box[0], bh = S.box[3] - S.box[1], k = Math.min(w / bw, h / bh);
         const ox = x + (w - bw * k) / 2 - S.box[0] * k, oy = y + (h - bh * k) / 2 - S.box[1] * k;
         g.save(); g.setTransform(dpr * k, 0, 0, dpr * k, dpr * ox, dpr * oy);
@@ -312,9 +341,10 @@
         g.font = `500 ${Math.min(30, W / 26)}px "IBM Plex Mono", monospace`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#fff';
         g.fillText(txt.slice(0, n) + (Math.floor(u * 4) % 2 ? '_' : ' '), W / 2, H / 2); return 0;
       }
-      function silFrame(g, u, nm, inv, label) {
+      function silFrame(g, u, nm, inv, label, period) {
         g.fillStyle = inv ? '#d4141f' : '#000'; g.fillRect(0, 0, W, H);
-        silhouette(g, nm, [W * .1, H * .1, W * .8, H * .72], inv ? '#000' : '#e8202f', inv ? '#000' : '#ff5a64');
+        silhouette(g, nm, [W * .1, H * .1, W * .8, H * .72], inv ? '#000' : '#e8202f', inv ? '#000' : '#ff5a64', false, period);
+        if (period) { g.font = `500 ${Math.min(22, W / 50)}px "IBM Plex Mono", monospace`; g.textAlign = 'right'; g.textBaseline = 'alphabetic'; g.fillStyle = '#fff'; g.fillText(period, W * .94, H * .92); }
         for (let y = 0; y < H; y += 4) { g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(0, y, W, 1); }
         const fs = Math.min(W / 9, H * .14);
         g.font = `800 ${fs}px "Barlow Condensed", "Arial Narrow", sans-serif`; g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.fillStyle = '#fff';
@@ -346,6 +376,36 @@
           [3.4, (g, u) => { theatreScene(g, u, TH.malaya, LILAC_PAL); }, '08.12.1941'],
           [2.0, (g, u) => { globe(g, 20, Math.min(1, u / 1.4), 1); }, '08.12.1941'],
           [2.9, (g, u) => endCard(g, u), '--.--.----']
+        ],
+        // Signal across the century: Pretoria 1900, Warsaw 1939, Baghdad 2003
+        eras: () => [
+          [2.3, (g, u) => { globe(g, u, 0, Math.min(1, u / .6)); }, '05.06.1900'],
+          [1.3, (g, u) => card(g, u, '5 JUNE 1900', 'THE AGE OF EMPIRES · PRETORIA', 'blue'), '05.06.1900'],
+          [3.4, (g, u) => { theatreScene(g, u, TH.boer, LILAC_PAL); }, '05.06.1900'],
+          [1.3, (g, u) => card(g, u, '1 SEPTEMBER 1939', 'THE WORLD AT WAR · WARSAW', 'blue'), '01.09.1939'],
+          [3.4, (g, u) => { theatreScene(g, u, TH.poland, LILAC_PAL); }, '01.09.1939'],
+          [1.3, (g, u) => card(g, u, '20 MARCH 2003', 'A NEW CENTURY · BAGHDAD', 'blue'), '20.03.2003'],
+          [3.4, (g, u) => { theatreScene(g, u, TH.iraq, LILAC_PAL); }, '20.03.2003'],
+          [2.0, (g, u) => { globe(g, 20, Math.min(1, u / 1.4), 1); }, '20.03.2003'],
+          [2.9, (g, u) => endCard(g, u), '--.--.----']
+        ],
+        // War footing across the century: each era's powers in silhouette
+        century: () => [
+          [1.3, (g, u) => typed(g, u, '1900 · 1939 · 2003', 1.0), '01.01.1900'],
+          [.9, (g, u) => card(g, u, 'EMPIRES', 'THE AGE OF EMPIRES', 'blue'), '01.01.1900'],
+          [.4, (g, u) => silFrame(g, u, 'Austria-Hungary', false, null, '1900'), '01.01.1900'],
+          [.4, (g, u) => silFrame(g, u, 'Ottoman Empire', true, null, '1900'), '01.01.1900'],
+          [.4, (g, u) => silFrame(g, u, 'Qing China', false, null, '1900'), '01.01.1900'],
+          [.9, (g, u) => card(g, u, 'WORLD WAR', 'THE WORLD AT WAR', 'red'), '01.09.1939'],
+          [.4, (g, u) => silFrame(g, u, 'Germany', true, null, '1939'), '01.09.1939'],
+          [.4, (g, u) => silFrame(g, u, 'Japan', false, null, '1939'), '01.09.1939'],
+          [.4, (g, u) => silFrame(g, u, 'USSR', true, null, '1939'), '01.09.1939'],
+          [.9, (g, u) => card(g, u, 'NEW ORDER', 'A NEW CENTURY', 'blue'), '20.03.2003'],
+          [.4, (g, u) => silFrame(g, u, 'United States', false, null, '2003'), '20.03.2003'],
+          [.4, (g, u) => silFrame(g, u, 'China', true, null, '2003'), '20.03.2003'],
+          [.4, (g, u) => silFrame(g, u, 'Iraq', false, null, '2003'), '20.03.2003'],
+          [2.2, (g, u) => { globe(g, 20, Math.min(1, u / 1.2), 1, RED_PAL); }, '--.--.----'],
+          [2.6, (g, u) => warEnd(g, u), '--.--.----']
         ],
         // War footing's hard cuts around an escalating readiness count
         countdown: () => [
@@ -422,7 +482,8 @@
       if (!inBox(p.box)) return;
       land.addPath(p.path);
       if (owner[i] === att) attP.addPath(p.path);
-      if (owner[i] === def && (!cfg.near || Math.hypot(p.lx - to[0], p.ly - to[1]) < cfg.near)) defList.push([Math.hypot(p.lx - ac.lx, p.ly - ac.ly), p.path]);
+      const src = cfg.fromAt ? [geo.X(cfg.fromAt[0]), geo.Y(cfg.fromAt[1])] : [ac.lx, ac.ly];
+      if (owner[i] === def && (!cfg.near || Math.hypot(p.lx - to[0], p.ly - to[1]) < cfg.near)) defList.push([Math.hypot(p.lx - src[0], p.ly - src[1]), p.path]);
     });
     defList.sort((a, b) => a[0] - b[0]);
     for (const k of geo.arcsIn(box[0] - pad, box[1] - pad, box[2] + pad, box[3] + pad)) {
@@ -431,7 +492,8 @@
     }
     const pats = {};
     const hatch = (g, rgb) => { if (pats[rgb]) return pats[rgb]; const t = document.createElement('canvas'); t.width = t.height = 12; const x = t.getContext('2d'); x.strokeStyle = `rgba(${rgb},.95)`; x.lineWidth = 3; x.beginPath(); x.moveTo(-3, 15); x.lineTo(15, -3); x.moveTo(-3, 3); x.lineTo(3, -3); x.moveTo(9, 15); x.lineTo(15, 9); x.stroke(); const pt = g.createPattern(t, 'repeat'); pt.setTransform && pt.setTransform(new DOMMatrix().scale(.06)); return (pats[rgb] = pt); };
-    return { box, land, ger: attP, pol: defList.map(x => x[1]), prov, border, from: [ac.lx, ac.ly], to, fromName: cfg.from, toName: cfg.to, hatch };
+    const from = cfg.fromAt ? [geo.X(cfg.fromAt[0]), geo.Y(cfg.fromAt[1])] : [ac.lx, ac.ly];
+    return { box, land, ger: attP, pol: defList.map(x => x[1]), prov, border, from, to, fromName: cfg.from, toName: cfg.to, hatch };
   }
 
   root.Intro = { play, seen() { try { return sessionStorage.getItem('imperium-intro') === '1'; } catch (e) { return false; } }, mark() { try { sessionStorage.setItem('imperium-intro', '1'); } catch (e) { /* storage unavailable */ } } };
