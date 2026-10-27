@@ -211,10 +211,10 @@
     }
     const pad = 1 / sc;
     const ids = geo.provsIn(x0 - pad, y0 - pad, x1 + pad, y1 + pad);
-    // soft blue sea so the land reads on its own
+    // textured blue sea so the land reads on its own
     const sea = new Path2D(); sea.rect(x0 - pad, y0 - pad, tw + 2 * pad, tw + 2 * pad);
     for (const i of ids) sea.addPath(geo.provs[i].path);
-    ctx.fillStyle = '#aecbdc'; ctx.fill(sea, 'evenodd');
+    ctx.fillStyle = seaTexture(ctx, sc / job.dpr); ctx.fill(sea, 'evenodd');
     // nation colours over the terrain; occupied land striped in the occupier's colour
     const byOwner = new Map(), occ = new Map();
     for (const i of ids) {
@@ -258,6 +258,7 @@ let GEO = null, STATE = null, TSZ = 256, CP = [];
 ${wDecode.toString()}
 ${arcPath.toString()}
 ${stripes.toString()}
+${seaTexture.toString()}
 ${tilePainter.toString()}
 onmessage = (e) => {
   const m = e.data;
@@ -877,7 +878,7 @@ onmessage = (e) => {
       const { ctx, cam, geo } = this, z = cam.z;
       this.drawnVer = this.version; this.drawnCam = { x: cam.x, y: cam.y, z: cam.z };
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = '#aecbdc'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
+      ctx.fillStyle = '#39abed'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
       this.drawTiles(ctx, now);
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.drawLabels(ctx, now);
@@ -1033,6 +1034,41 @@ onmessage = (e) => {
 
   // Diagonal stripes in a colour, sized in screen pixels. Closure-free so the painter can
   // run inside a Web Worker too (document.createElement is unavailable there).
+  // Sea texture: the sea colour with soft wave strokes and a little grain, sized in screen pixels
+  // and anchored to the world origin so neighbouring tiles line up. Closure-free like stripes().
+  function seaTexture(ctx, z) {
+    let base = seaTexture.base;
+    if (!base) {
+      const S = 160;
+      base = typeof document !== 'undefined' && document.createElement ? document.createElement('canvas') : new OffscreenCanvas(S, S);
+      base.width = base.height = S;
+      const c = base.getContext('2d');
+      c.fillStyle = '#39abed'; c.fillRect(0, 0, S, S);
+      let seed = 7;
+      const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+      // grain
+      for (let i = 0; i < 1400; i++) {
+        c.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.06)' : 'rgba(10,60,110,0.06)';
+        c.fillRect(Math.floor(rnd() * S), Math.floor(rnd() * S), 1, 1);
+      }
+      // short wave strokes, drawn three times over so they wrap across the tile edges
+      c.lineCap = 'round'; c.lineWidth = 1.2;
+      for (let i = 0; i < 26; i++) {
+        const x = rnd() * S, y = rnd() * S, w = 10 + rnd() * 14, light = rnd() < 0.6;
+        c.strokeStyle = light ? 'rgba(255,255,255,0.22)' : 'rgba(12,70,120,0.16)';
+        for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) {
+          c.beginPath(); c.moveTo(x + dx, y + dy);
+          c.quadraticCurveTo(x + dx + w / 4, y + dy - 3, x + dx + w / 2, y + dy);
+          c.quadraticCurveTo(x + dx + w * 3 / 4, y + dy + 3, x + dx + w, y + dy);
+          c.stroke();
+        }
+      }
+      seaTexture.base = base;
+    }
+    const pat = ctx.createPattern(base, 'repeat');
+    if (pat.setTransform) pat.setTransform(new DOMMatrix().scale(1 / z));
+    return pat;
+  }
   function stripes(ctx, color, z) {
     if (!stripes.cache) stripes.cache = new Map();
     let base = stripes.cache.get(color);
@@ -1058,7 +1094,7 @@ onmessage = (e) => {
   function renderPreview(cv, data, state) {
     const geo = prepare(data), c = cv.getContext('2d');
     const s = Math.max(cv.width / geo.W, cv.height / geo.H);
-    c.fillStyle = '#aecbdc'; c.fillRect(0, 0, cv.width, cv.height);
+    c.fillStyle = seaTexture(c, 1); c.fillRect(0, 0, cv.width, cv.height);
     c.save(); c.translate((cv.width - geo.W * s) / 2, (cv.height - geo.H * s) / 2 - 8); c.scale(s, s);
     const land = new Path2D(); state.owner.forEach((o, i) => land.addPath(geo.provs[i].path));
     c.save(); c.clip(land); c.fillStyle = '#e4eaeb'; c.fillRect(0, 0, geo.W, geo.H);
