@@ -6,7 +6,7 @@ French...). This pass fixes ownership province by province, using the modern cou
 province lies in plus a few province names.
 
 Run after build_map.py, on freshly built data (it is not meant to run twice):
-    python3 tools/fix_borders.py <srcdir with admin1.geojson> [1900 1939]
+    python3 tools/fix_borders.py <srcdir with admin1.geojson> [1900 1939 2003]
 """
 import json
 import os
@@ -40,8 +40,18 @@ ISLANDS_1900 = {
     'Macau S.A.R': PT, 'Comoros': FR, 'French Polynesia': FR, 'New Caledonia': FR, 'French Southern': FR,
     'Saint Pierre and Miquelon': FR, 'Federated States of Micronesia': DE, 'Marshall Islands': DE, 'Palau': DE,
     'Northern Mariana Islands': DE, 'Nauru': DE, 'Faroe Islands': DK, 'Puerto Rico': US, 'Cuba': US,
-    'US Naval Base Guantanamo Bay': US, 'Guam': US, 'Taiwan': JP,
+    'US Naval Base Guantanamo Bay': US, 'Guam': US, 'Taiwan': JP, 'Aruba': NL, 'Guernsey': UK, 'Jersey': UK, 'Samoa': DE,
+    'Swaziland': UK, 'Moldova': 'Russia', 'Kyrgyzstan': 'Russia', 'Thailand': 'Siam',
 }
+KHANATES = 'central Asian khanates'
+# Bukhara and Khiva (Russian protectorates) by province; the rest of Central Asia was Russian
+KHANATE_PROVINCES = {'Bukhara', 'Navoiy', 'Qashqadaryo', 'Surxondaryo', 'Xorazm', 'Karakalpakstan', 'Daşoguz', 'Lebap',
+                     'Southeast Lebap', 'Dushanbe', 'Khatlon', 'West Gorno-Badakhshan'}
+# Kaiser-Wilhelmsland and the Bismarck Archipelago: the German half of New Guinea
+GERMAN_NEW_GUINEA = {'Sandaun', 'East Sepik', 'Madang', 'Morobe', 'Enga', 'Western Highlands', 'Chimbu', 'Eastern Highlands',
+                     'West New Britain', 'East New Britain', 'New Ireland', 'Manus', 'of Bougainville'}
+# Siamese until the treaties of 1904-1909
+SIAM_1900 = {'Battambang', 'Siem Reap', 'Banteay Meanchey', 'Sainyabuli', 'Kelantan', 'Terengganu'}
 ISLANDS_1939 = {
     'Bermuda': UK, 'Falkland Islands': UK, 'Mauritius': UK, 'Seychelles': UK, 'Maldives': UK, 'Saint Helena': UK, 'Fiji': UK,
     'Solomon Islands': UK, 'Pitcairn Islands': UK, 'South Georgia': UK, 'British Indian Ocean': UK, 'Indian Ocean Territories': UK,
@@ -63,6 +73,20 @@ def aden(name):
 
 def rules_1900(c, owner, name):
     """New owner for a province in 1900 (or None to leave it)."""
+    if c == 'United States of America' and owner is None:
+        return US                                            # the western Aleutians
+    if name in SIAM_1900:
+        return 'Siam'
+    if c in ('Uzbekistan', 'Turkmenistan', 'Tajikistan'):
+        return KHANATES if name in KHANATE_PROVINCES else 'Russia'
+    if c == 'Papua New Guinea':
+        return DE if name in GERMAN_NEW_GUINEA else UK
+    if c == 'Ukraine' and name in ('East Chernivtsi', 'Southwest Odessa'):
+        return 'Russia'                                      # Bessarabia was Russian until 1918
+    if (c, name) in (('Republic of Serbia', 'Southwest Zlatibor'), ('Greece', 'Southeast West Macedonia')):
+        return 'Ottoman Empire'                              # the Sandžak and Macedonia
+    if c == 'Brazil' and name == 'Roraima':
+        return 'Brazil'
     if c in COLONY_1900 and (owner in GONE_1900 or owner != COLONY_1900[c]):
         return COLONY_1900[c]
     if owner in GONE_1900:
@@ -88,16 +112,22 @@ def rules_1900(c, owner, name):
         return 'Bulgaria'                                    # Eastern Rumelia joined Bulgaria in 1885
     if (c == 'Myanmar' and owner == 'Siam') or (c == 'Guyana' and owner != UK):
         return UK
-    if c in ('Germany', 'Portugal', 'France', 'Colombia', 'Ecuador') and owner != {'Germany': DE}.get(c, c):
-        return {'Germany': DE}.get(c, c)
+    if c in ('Germany', 'Portugal', 'Colombia', 'Ecuador') and owner != c:
+        return c
+    if c == 'France' and owner is None:
+        return FR
     if c == 'India' and name.startswith('Andaman'):
         return UK
-    if c in ('Australia', 'New Zealand', 'Papua New Guinea') and owner is None:
+    if c in ('Australia', 'New Zealand') and owner is None:
         return UK
     return None
 
 
 def rules_1939(c, owner, name):
+    if c == 'United States of America' and owner is None:
+        return US
+    if c in ('Thailand', 'Iran'):
+        return {'Thailand': 'Siam'}.get(c, c)
     for k, v in ISLANDS_1939.items():
         if c.startswith(k):
             return v
@@ -128,13 +158,42 @@ def rules_1939(c, owner, name):
     return None
 
 
-NEW_NATIONS = {'1939': {'Slovakia': 'Bratislava'}}
-CAPITALS = {'1939': {'China': 'Chongqing'}}            # wartime capital: Nanjing had fallen in 1937
+CAPITALS = {'1939': {'China': 'Chongqing', 'Slovakia': 'Bratislava'}}   # China's wartime capital: Nanjing had fallen in 1937
+
+# 2003: land belongs to the country it lies in today, with these exceptions and renamings
+SOVEREIGN_2003 = {
+    'Hong Kong S.A.R.': 'China', 'Macau S.A.R': 'China', 'S. Sudan': 'Sudan', 'Somaliland': 'Somalia', 'Kosovo': 'Serbia',
+    'Western Sahara': 'Morocco', 'Gaza Strip': 'Israel', 'West Bank': 'Israel', 'Northern Cyprus': 'Turkey', 'Siachen Glacier': 'India',
+    'Baykonur Cosmodrome': 'Kazakhstan', 'Aland': 'Finland', 'Greenland': 'Denmark', 'Faroe Islands': 'Denmark',
+    'United States of America': US, 'Puerto Rico': US, 'US Naval Base Guantanamo Bay': US, 'Guam': US, 'Northern Mariana Islands': US,
+    'American Samoa': US, 'United States Virgin Islands': US,
+    'Akrotiri Sovereign Base Area': UK, 'Dhekelia Sovereign Base Area': UK, 'Anguilla': UK, 'Bermuda': UK, 'British Indian Ocean': UK,
+    'British Virgin Islands': UK, 'Cayman Islands': UK, 'Falkland Islands': UK, 'Montserrat': UK, 'Pitcairn Islands': UK,
+    'Saint Helena': UK, 'South Georgia': UK, 'Turks and Caicos Islands': UK, 'Isle of Man': UK, 'Guernsey': UK, 'Jersey': UK,
+    'French Polynesia': FR, 'New Caledonia': FR, 'Wallis and Futuna': FR, 'Saint Martin': FR, 'Saint Pierre and Miquelon': FR,
+    'French Southern': FR, 'Saint Barthelemy': FR,
+    'Aruba': NL, 'Curaçao': NL, 'Caribbean Netherlands': NL, 'Sint Maarten': NL,
+    'Norfolk Island': 'Australia', 'Heard Island': 'Australia', 'Indian Ocean Territories': 'Australia', 'Ashmore and Cartier': 'Australia',
+    'Cook Islands': 'New Zealand', 'Niue': 'New Zealand',
+    'Republic of Serbia': 'Serbia', 'Democratic Republic of the Congo': 'DR Congo', 'Republic of the Congo': 'Congo',
+    'United Republic of Tanzania': 'Tanzania', 'The Bahamas': 'Bahamas', 'Trinidad and Tobago': 'Trinidad', 'Guinea Bissau': 'Guinea-Bissau',
+    'eSwatini': 'Swaziland', 'North Macedonia': 'Macedonia', 'Federated States of Micronesia': 'Micronesia',
+    'Sao Tome and Principe': 'São Tomé and Príncipe', 'Czechia': 'Czech Republic',
+}
+
+
+def rules_2003(c, owner, name):
+    if c == 'Russia' and name in ('Crimea', 'Sevastopol'):
+        return 'Ukraine'                                     # Ukrainian in 2003
+    for k, v in SOVEREIGN_2003.items():
+        if c.startswith(k):
+            return v
+    return c
 
 
 def main():
     src = sys.argv[1]
-    years = sys.argv[2:] or ['1900', '1939']
+    years = sys.argv[2:] or ['1900', '1939', '2003']
     feats = json.load(open(os.path.join(src, 'admin1.geojson')))['features']
     geoms = [shape(f['geometry']) for f in feats]
     tree = STRtree(geoms)
@@ -148,28 +207,26 @@ def main():
         path = f'data/world-{year}.json'
         d = json.load(open(path))
         names = [n['name'] for n in d['nations']]
-        for nn in NEW_NATIONS.get(year, {}):
-            names.append(nn)
-            d['nations'].append({'name': nn, 'cap': -1, 'area': 0, 'great': False})
         idx = {n: i for i, n in enumerate(names)}
-        rule = rules_1900 if year == '1900' else rules_1939
-        moved = 0
+        rule = {'1900': rules_1900, '1939': rules_1939, '2003': rules_2003}[year]
+        moved, added = 0, []
         for p in d['provinces']:
             owner = names[p['o']] if p['o'] >= 0 else None
             new = rule(modern(p), owner, p['n'])
             if new and new != owner:
+                if new not in idx:                           # a nation the source map left out
+                    idx[new] = len(names); names.append(new); added.append(new)
+                    d['nations'].append({'name': new, 'cap': -1, 'area': 0, 'great': False})
                 p['o'] = idx[new]
                 moved += 1
             if year == '1939' and p['n'] in OCCUPIED_1939 and owner == 'China':
                 p['oc'] = idx[JP]
-        # capitals of new nations, and of nations whose capital changed hands
-        for nn, capname in NEW_NATIONS.get(year, {}).items():
-            d['nations'][idx[nn]]['cap'] = next(i for i, p in enumerate(d['provinces']) if p['n'] == capname)
+        # capitals: set ones first, then new nations and nations whose capital changed hands get their biggest city
         for nn, capname in CAPITALS.get(year, {}).items():
             d['nations'][idx[nn]]['cap'] = next(i for i, p in enumerate(d['provinces']) if p['n'] == capname)
         for i, n in enumerate(d['nations']):
             mine = [k for k, p in enumerate(d['provinces']) if p['o'] == i]
-            if mine and d['provinces'][n['cap']]['o'] != i:
+            if mine and (n['cap'] < 0 or d['provinces'][n['cap']]['o'] != i):
                 n['cap'] = max(mine, key=lambda k: (d['provinces'][k]['pop'], d['provinces'][k]['a']))
         # drop nations left without land, renumber owners
         keep = [i for i in range(len(d['nations'])) if any(p['o'] == i for p in d['provinces'])]
@@ -184,7 +241,7 @@ def main():
         for i, n in enumerate(d['nations']):
             n['area'] = sum(p['a'] for p in d['provinces'] if p['o'] == i)
         json.dump(d, open(path, 'w'), separators=(',', ':'), ensure_ascii=False)
-        print(year, f'{moved} provinces moved; removed: {", ".join(gone) or "none"}; added: {", ".join(NEW_NATIONS.get(year, {})) or "none"}')
+        print(year, f'{moved} provinces moved; removed: {", ".join(gone) or "none"}; added: {", ".join(added) or "none"}')
 
 
 if __name__ == '__main__':

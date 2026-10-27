@@ -673,7 +673,9 @@
     g.orders = ''; diploLog = []; if (!$('tab-orders').hidden) renderOrders();
     $('news-status').hidden = false;
     try {
+      const game = g, world = data;
       const { online, res, error } = await GM.runTurn(data, g, { orders, diplomacy: diplo, battles: facts });
+      if (g !== game || data !== world) return;    // the player left this game while the news was being written
       aiState = online ? 'on' : 'off'; updateBadge();
       if (!online) { console.warn('AI offline:', error); pingTimer = setTimeout(pingAI, 20000); }
       GM.applyTurn(data, g, res);

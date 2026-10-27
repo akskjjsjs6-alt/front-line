@@ -168,6 +168,13 @@ def split_large(r, limit=320000):
 
 
 # ------------------------------------------------------------------ historical ownership
+# Land the historical source puts on the wrong side of a border, as whole first-level regions of
+# Natural Earth: year of the source map -> new owner -> [(country, [regions])]
+OVERRIDES = {
+    1900: {'Germany': [('France', ['Moselle', 'Bas-Rhin', 'Haute-Rhin'])],          # Alsace-Lorraine, 1871-1918
+           'Russia': [('Turkey', ['Kars', 'Ardahan', 'Artvin'])]},                    # Russian 1878-1918
+    1938: {'United Kingdom': [('Cameroon', ['Nord-Ouest', 'Sud-Ouest'])]},            # British Cameroons
+}
 PRINCELY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'princely_states.geojson')
 PRINCELY = set()
 
@@ -210,6 +217,15 @@ def nation_shapes(year):
                     un = un.difference(piece)
         unclaimed = [un]
     shapes = {k: clean(unary_union(v)) for k, v in parts.items()}
+    if src in OVERRIDES:
+        a1 = json.load(open(os.path.join(SRC, 'admin1.geojson')))['features']
+        for owner, items in OVERRIDES[src].items():
+            want = {(c, r) for c, regs in items for r in regs}
+            g = clean(unary_union([shape(f['geometry']).buffer(0) for f in a1 if (f['properties']['admin'], f['properties']['name']) in want]))
+            for k in list(shapes):
+                if k != owner and shapes[k].intersects(g):
+                    shapes[k] = clean(shapes[k].difference(g))
+            shapes[owner] = clean(unary_union([shapes.get(owner, g), g]))
     if src in (1900, 1938):
         # India's princely states (tools/princely_states.geojson, built by princely.py) carved out of British India
         raj = shapes['United Kingdom']
