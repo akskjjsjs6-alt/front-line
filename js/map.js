@@ -214,7 +214,7 @@
     // soft blue sea so the land reads on its own
     const sea = new Path2D(); sea.rect(x0 - pad, y0 - pad, tw + 2 * pad, tw + 2 * pad);
     for (const i of ids) sea.addPath(geo.provs[i].path);
-    ctx.fillStyle = '#d3e2e9'; ctx.fill(sea, 'evenodd');
+    ctx.fillStyle = '#aecbdc'; ctx.fill(sea, 'evenodd');
     // nation colours over the terrain; occupied land striped in the occupier's colour
     const byOwner = new Map(), occ = new Map();
     for (const i of ids) {
@@ -877,7 +877,7 @@ onmessage = (e) => {
       const { ctx, cam, geo } = this, z = cam.z;
       this.drawnVer = this.version; this.drawnCam = { x: cam.x, y: cam.y, z: cam.z };
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = '#d3e2e9'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
+      ctx.fillStyle = '#aecbdc'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
       this.drawTiles(ctx, now);
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.drawLabels(ctx, now);
@@ -1058,7 +1058,7 @@ onmessage = (e) => {
   function renderPreview(cv, data, state) {
     const geo = prepare(data), c = cv.getContext('2d');
     const s = Math.max(cv.width / geo.W, cv.height / geo.H);
-    c.fillStyle = '#d3e2e9'; c.fillRect(0, 0, cv.width, cv.height);
+    c.fillStyle = '#aecbdc'; c.fillRect(0, 0, cv.width, cv.height);
     c.save(); c.translate((cv.width - geo.W * s) / 2, (cv.height - geo.H * s) / 2 - 8); c.scale(s, s);
     const land = new Path2D(); state.owner.forEach((o, i) => land.addPath(geo.provs[i].path));
     c.save(); c.clip(land); c.fillStyle = '#e4eaeb'; c.fillRect(0, 0, geo.W, geo.H);
