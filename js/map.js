@@ -243,8 +243,8 @@
     const z = sc / job.dpr, px = w => w * 1.3 / z;
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     if (z > 0.9 && prov.length) { ctx.strokeStyle = `rgba(40,50,55,${Math.min(0.28, (z - 0.9) * 0.25)})`; ctx.lineWidth = px(0.7); ctx.stroke(arcPath(geo, prov)); }
-    if (coast.length) { ctx.strokeStyle = 'rgba(120,148,162,0.7)'; ctx.lineWidth = px(0.8); ctx.stroke(arcPath(geo, coast)); }
-    if (nation.length) { ctx.strokeStyle = 'rgba(80,90,96,0.6)'; ctx.lineWidth = px(Math.max(1, Math.min(2.2, z * 0.6))); ctx.stroke(arcPath(geo, nation)); }
+    if (coast.length) { ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = px(0.9); ctx.stroke(arcPath(geo, coast)); }
+    if (nation.length) { ctx.strokeStyle = 'rgba(0,0,0,0.9)'; ctx.lineWidth = px(Math.max(1, Math.min(2.2, z * 0.6))); ctx.stroke(arcPath(geo, nation)); }
     if (front.length && job.front) {
       const p = arcPath(geo, front);
       ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = px(4.5); ctx.stroke(p);
