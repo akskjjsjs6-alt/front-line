@@ -17,23 +17,6 @@
     return reliefImg;
   }
 
-  // Flag atlases: one image per period with every nation's flag, plus where each flag sits in it.
-  const flagSets = {};
-  function loadFlags(period) {
-    if (!period) return Promise.resolve(null);
-    if (!flagSets[period]) flagSets[period] = fetch(`data/flags/${period}.json`).then(r => r.ok ? r.json() : null).then(meta => {
-      if (!meta) return null;
-      return new Promise(res => {
-        const img = new Image();
-        img.onload = () => { meta.img = img; meta.url = img.src; flagSets[period].ready = meta; res(meta); };
-        img.onerror = () => res(null);
-        img.src = `data/flags/${period}.png`;
-      });
-    }).catch(() => null);
-    return flagSets[period];
-  }
-  function flagsReady(period) { return flagSets[period] && flagSets[period].ready || null; }
-
   // Decode the shared arcs and province rings once per data set.
   function prepare(data) {
     if (data._geo) return data._geo;
@@ -151,39 +134,13 @@
     });
     return { arcs, provs, users: geo.users.map(u => u.slice()), W: geo.W, H: geo.H, transfer };
   }
-  function statePack(g, fl) {
+  function statePack(g) {
     const wars = new Set();
     for (let a = 0; a < g.nations.length; a++) {
       if (!g.nations[a].alive) continue;
       for (let b = a + 1; b < g.nations.length; b++) if (root.World.atWar(g, a, b)) wars.add(a * 512 + b);
     }
-    const s = { owner: g.owner, ctrl: g.ctrl, colors: g.nations.map(n => n.color), wars };
-    if (fl) { s.region = fl.region; s.rboxes = fl.rboxes; s.frect = fl.frect; }
-    return s;
-  }
-  // Flag map: every connected piece of a nation's land (its mainland, each colony, each island) gets its own flag,
-  // stretched over the piece's bounding box. region[p] is the piece of province p; rboxes holds
-  // [nation, x0, y0, x1, y1] per piece; frect holds [x, y, w, h] of each nation's flag in the atlas (w = 0: none).
-  function flagRegions(g, data, geo, meta) {
-    const N = g.owner.length, region = new Int32Array(N).fill(-1), boxes = [];
-    for (let s = 0; s < N; s++) {
-      const o = g.owner[s]; if (o < 0 || region[s] >= 0) continue;
-      const r = boxes.length / 5, q = [s]; region[s] = r;
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      while (q.length) {
-        const p = q.pop(), b = geo.provs[p].box;
-        if (b[0] < x0) x0 = b[0]; if (b[1] < y0) y0 = b[1]; if (b[2] > x1) x1 = b[2]; if (b[3] > y1) y1 = b[3];
-        for (const x of data.provinces[p].nb) if (region[x] < 0 && g.owner[x] === o) { region[x] = r; q.push(x); }
-      }
-      boxes.push(o, x0, y0, x1, y1);
-    }
-    const frect = new Float32Array(g.nations.length * 4);
-    g.nations.forEach((n, i) => {
-      // keyed by the nation's original name, so a rename by the AI keeps the flag
-      const name = data.nations[i] ? data.nations[i].name : n.name, r = meta.rects[name];
-      if (r) frect.set(r, i * 4);
-    });
-    return { region, rboxes: new Float32Array(boxes), frect };
+    return { owner: g.owner, ctrl: g.ctrl, colors: g.nations.map(n => n.color), wars };
   }
   function wDecode(pkt) {
     // worker side of prepare(): rebuild paintable paths and the spatial index from a packet
@@ -262,26 +219,8 @@
       const ct = ST.ctrl[i];
       if (ct >= 0 && ct !== o) { let q = occ.get(ct); if (!q) occ.set(ct, q = new Path2D()); q.addPath(geo.provs[i].path); }
     }
-    if (ST.region && env.flags) {
-      // flag map: each piece of land shows its nation's flag, stretched over the piece (aspect kept within reason)
-      const byReg = new Map();
-      for (const i of ids) { const r = ST.region[i]; if (r < 0) continue; let p = byReg.get(r); if (!p) byReg.set(r, p = new Path2D()); p.addPath(geo.provs[i].path); }
-      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-      for (const [r, p] of byReg) {
-        const b = r * 5, o = ST.rboxes[b], f = o * 4, fw = ST.frect[f + 2], fh = ST.frect[f + 3];
-        if (!fw) { ctx.globalAlpha = 0.58; ctx.fillStyle = ST.colors[o]; ctx.fill(p); continue; }
-        const bx = ST.rboxes[b + 1], by = ST.rboxes[b + 2], bw = Math.max(0.01, ST.rboxes[b + 3] - bx), bh = Math.max(0.01, ST.rboxes[b + 4] - by);
-        const fa = fw / fh, ra = bw / bh, a = Math.max(fa / 1.7, Math.min(fa * 1.7, ra));
-        const dw = a > ra ? bh * a : bw, dh = a > ra ? bh : bw / a;
-        ctx.save(); ctx.clip(p);
-        ctx.globalAlpha = 0.9;
-        ctx.drawImage(env.flags, ST.frect[f], ST.frect[f + 1], fw, fh, bx + (bw - dw) / 2, by + (bh - dh) / 2, dw, dh);
-        ctx.restore();
-      }
-    } else {
-      ctx.globalAlpha = 0.58;
-      for (const [o, p] of byOwner) { ctx.fillStyle = ST.colors[o]; ctx.fill(p); }
-    }
+    ctx.globalAlpha = 0.58;
+    for (const [o, p] of byOwner) { ctx.fillStyle = ST.colors[o]; ctx.fill(p); }
     ctx.globalAlpha = 0.85;
     for (const [o, p] of occ) { ctx.fillStyle = stripes(ctx, ST.colors[o], sc / job.dpr); ctx.fill(p); }
     ctx.globalAlpha = 1;
@@ -326,15 +265,13 @@ onmessage = (e) => {
     TSZ = m.ts;
     postMessage({ t: 'ready' });
   } else if (m.t === 'state') {
-    STATE = { owner: m.owner, ctrl: m.ctrl, colors: m.colors, wars: m.wars, region: m.region, rboxes: m.rboxes, frect: m.frect };
-  } else if (m.t === 'flags') {
-    GEO.flags = m.bmp || null;
+    STATE = { owner: m.owner, ctrl: m.ctrl, colors: m.colors, wars: m.wars };
   } else if (m.t === 'job') {
     // paint on a canvas owned by the worker (a canvas with a context can't be transferred),
     // then hand the finished pixels over as a transferable ImageBitmap
     let cv = CP.pop(); if (!cv) cv = new OffscreenCanvas(TSZ, TSZ);
     m.cv = cv;
-    tilePainter({ geo: GEO, state: STATE, ts: GEO.ts, s0: GEO.s0, relief: GEO.relief, flags: GEO.flags }, m);
+    tilePainter({ geo: GEO, state: STATE, ts: GEO.ts, s0: GEO.s0, relief: GEO.relief }, m);
     postMessage({ t: 'done', k: m.k, ver: m.ver, bmp: cv.transferToImageBitmap() }, []);
   }
 }`;
@@ -354,9 +291,7 @@ onmessage = (e) => {
       this.anim = null; this.wheel = null;
       this.tiles = new Map(); this.pool = []; this.cacheCap = 256;
       this.wq = []; this.wks = null; this.wInit = false; this.statePktVer = -1; this.mEnv = null; this.mEnvVer = -1;
-      this.mode = opts.mapMode || 'flags'; this.flagCache = null; this.flagsSent = false;
       this.bootWorkers();
-      loadFlags(opts.period).then(meta => { if (meta) { this.sendFlags(); this.paint(); } });
       this.version = 0; this.labelsDirty = true; this.labelsAt = 0;
       this.drawnVer = -1; this.drawnArmyHash = null; this.drawnAt = 0;
       this.hit = document.createElement('canvas').getContext('2d');
@@ -367,23 +302,6 @@ onmessage = (e) => {
       this.strSprites = new Map();    // army strength plates
       const img = relief(); if (!img.complete) img.addEventListener('load', () => this.paint(), { once: true });
       this.bindInput();
-    }
-
-    // ---------------------------------------------------------------- flag map
-    setMode(mode) { if (mode !== this.mode) { this.mode = mode; this.paint(); } }
-    flagMeta() { return this.mode === 'flags' ? flagsReady(this.opts.period) : null; }
-    // flag pieces are recomputed only when land changes owner (occupation alone does not move flags)
-    flagState() {
-      const meta = this.flagMeta(); if (!meta) return null;
-      const g = this.opts.state(), key = g.owner.join(',') + '|' + g.nations.length;
-      if (!this.flagCache || this.flagCache.key !== key) this.flagCache = { key, ...flagRegions(g, this.data, this.geo, meta) };
-      return this.flagCache;
-    }
-    sendFlags() {
-      const meta = flagsReady(this.opts.period);
-      if (!meta || !this.workersActive() || this.flagsSent) return;
-      this.flagsSent = true;
-      createImageBitmap(meta.img).then(bmp => { if (this.wks) for (const e of this.wks) e.w.postMessage({ t: 'flags', bmp }); this.paint(); }).catch(() => {});
     }
 
     // ---------------------------------------------------------------- invalidation
@@ -551,7 +469,6 @@ onmessage = (e) => {
             } catch (err) { console.error('tile worker init:', String(err).slice(0, 200)); }
           }
           this.wInit = true;
-          this.sendFlags();
           this.deliver();
         }).catch(err => { console.error('tile worker boot:', String(err).slice(0, 300)); this.killWorkers(); });
       };
@@ -604,8 +521,8 @@ onmessage = (e) => {
         t.q = false;
         if (this.tiles.get(t.k) !== t) continue;           // evicted meanwhile
         if (this.statePktVer !== this.version) {           // game state changed: brief the painters
-          const s = statePack(this.opts.state(), this.flagState());
-          for (const x of this.wks) x.w.postMessage({ t: 'state', ver: this.version, owner: s.owner, ctrl: s.ctrl, colors: s.colors, wars: s.wars, region: s.region, rboxes: s.rboxes, frect: s.frect });
+          const s = statePack(this.opts.state());
+          for (const x of this.wks) x.w.postMessage({ t: 'state', ver: this.version, owner: s.owner, ctrl: s.ctrl, colors: s.colors, wars: s.wars });
           this.statePktVer = this.version;
         }
         e.busy = true;
@@ -620,8 +537,7 @@ onmessage = (e) => {
     workersActive() { return this.wks && this.wInit; }
     mainEnv() {
       if (this.mEnvVer !== this.version) {
-        const fm = this.flagMeta();
-        this.mEnv = { geo: this.geo, state: statePack(this.opts.state(), this.flagState()), ts: TS, s0: S0, relief: relief(), flags: fm ? fm.img : null };
+        this.mEnv = { geo: this.geo, state: statePack(this.opts.state()), ts: TS, s0: S0, relief: relief() };
         this.mEnvVer = this.version;
       }
       return this.mEnv;
@@ -1109,6 +1025,4 @@ onmessage = (e) => {
   root.WorldMap = WorldMap;
   root.WorldMap.renderPreview = renderPreview;
   root.WorldMap.prepare = prepare;
-  root.WorldMap.loadFlags = loadFlags;
-  root.WorldMap.flagsReady = flagsReady;
 })(typeof window !== 'undefined' ? window : globalThis);

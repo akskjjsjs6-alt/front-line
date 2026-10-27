@@ -17,17 +17,6 @@
   const DAYS_PER_SEC = [0, 1, 3, 8];
   let speed = 0, lastSpeed = 1, acc = 0, lastFrame = 0, gmBusy = false, battleNotes = new Map(), lastSave = 0, captureToast = 0;
 
-  // A nation's flag, cut out of the period's flag atlas as a CSS sprite (falls back to its map colour).
-  function flagStyle(st, i, h) {
-    const n = st.nations[i], meta = WorldMap.flagsReady(st.period || period);
-    const name = data && data.nations[i] ? data.nations[i].name : n.name, r = meta && meta.rects[name];
-    if (!r) return `background:${n.color};width:${h}px;height:${h}px`;
-    const k = h / r[3];
-    return `width:${Math.round(r[2] * k)}px;height:${h}px;background:url(data/flags/${st.period || period}.png) no-repeat;background-size:${meta.w * k}px ${meta.h * k}px;background-position:${-r[0] * k}px ${-r[1] * k}px`;
-  }
-  const flagIcon = (st, i, h) => `<i class="flag" style="${flagStyle(st, i, h || 14)}"></i>`;
-  const mapMode = () => store.get('frontline-mapmode') || 'flags';
-
   async function loadData(pid) {
     if (!cache[pid]) cache[pid] = fetch(W.PERIODS[pid].file).then(r => { if (!r.ok) throw new Error('map ' + r.status); return r.json(); });
     return cache[pid];
@@ -94,7 +83,6 @@
     $('pick-title').textContent = `${pid} · ${W.PERIODS[pid].title}`;
     $('pick-card').hidden = true; pickSel = -1; $('pick-search').value = ''; $('pick-results').hidden = true;
     data = await loadData(pid);
-    await WorldMap.loadFlags(pid);
     pickState = W.newGame(data, pid);
     window.WorldData = data;
     if (pickMap) pickMap.cv.replaceWith(pickMap.cv = cloneCanvas(pickMap.cv));
@@ -103,13 +91,13 @@
       onClick: p => { if (p >= 0 && pickState.owner[p] >= 0) choosePick(pickState.owner[p]); },
       onHover: (p, pt) => {},
       highlights: () => pickSel < 0 ? [] : W.provincesOf(pickState, pickSel).map(p => ({ p, fill: 'rgba(255,255,255,.35)' })),
-      armies: () => [], battles: () => [], period: pid, mapMode: mapMode()
+      armies: () => [], battles: () => []
     });
     pickMap.resize(); pickMap.paint(); pickMap.cam.z = pickMap.fitZ() * 2.2; pickMap.cam.x = pickMap.W * 0.42; pickMap.cam.y = pickMap.H * 0.12; pickMap.clamp();
     const q = $('pick-quick'); q.innerHTML = '';
     pickState.nations.map((n, i) => [n, i]).filter(([n]) => n.great).sort((a, b) => b[0].startDiv - a[0].startDiv).forEach(([n, i]) => {
       const c = document.createElement('button'); c.className = 'chip';
-      c.innerHTML = `${flagIcon(pickState, i)}${esc(n.name)}`;
+      c.innerHTML = `<i class="swatch" style="background:${n.color}"></i>${esc(n.name)}`;
       c.onclick = () => { choosePick(i); pickMap.focus(n.cap, 2.2); };
       q.appendChild(c);
     });
@@ -119,7 +107,7 @@
     pickSel = i;
     const n = pickState.nations[i], card = $('pick-card');
     const div = Math.round(W.divisions(pickState, i)), provs = W.provincesOf(pickState, i).length;
-    card.innerHTML = `<button class="x" aria-label="Close">×</button><h3>${flagIcon(pickState, i, 18)}${esc(n.name)}</h3>
+    card.innerHTML = `<button class="x" aria-label="Close">×</button><h3><i class="swatch" style="background:${n.color}"></i>${esc(n.name)}</h3>
       <div class="meta">${esc(n.leader || 'Leader unknown')}${n.gov ? ' · ' + esc(n.gov) : ''}</div>
       <div class="rows"><span>Power</span><span>${n.great ? 'Great power' : div > 15 ? 'Regional power' : 'Minor nation'}</span>
       <span>Army</span><span>${div} divisions</span><span>Provinces</span><span>${provs}</span><span>Economy</span><span>${n.eco}</span>
@@ -136,7 +124,7 @@
     const hits = pickState.nations.map((n, i) => [n, i]).filter(([n]) => n.alive && n.name.toLowerCase().includes(q)).slice(0, 12);
     box.innerHTML = hits.length ? '' : '<button disabled>No match</button>';
     for (const [n, i] of hits) {
-      const b = document.createElement('button'); b.innerHTML = `${flagIcon(pickState, i)}${esc(n.name)}`;
+      const b = document.createElement('button'); b.innerHTML = `<i class="swatch" style="background:${n.color}"></i>${esc(n.name)}`;
       b.onclick = () => { box.hidden = true; $('pick-search').value = ''; choosePick(i); pickMap.focus(n.cap, 2.2); };
       box.appendChild(b);
     }
@@ -155,7 +143,6 @@
   async function continueGame() {
     const s = readSave(); if (!s) return;
     data = await loadData(s.period); period = s.period; g = s.g; diploLog = s.diploLog || [];
-    await WorldMap.loadFlags(s.period);
     enterGame();
     toast(`Welcome back. ${W.dateLabel(g)}.`, 'info');
   }
@@ -169,21 +156,13 @@
     W.drainEvents(); W.drainChanged();
     if (map) { map.dispose && map.dispose(); const old = $('map'), n = cloneCanvas(old); old.replaceWith(n); }
     map = new WorldMap($('map'), data, {
-      state: () => g, onClick, onHover, highlights, armies: armyViews, battles: battleViews, fronts, period: g.period, mapMode: mapMode()
+      state: () => g, onClick, onHover, highlights, armies: armyViews, battles: battleViews, fronts
     });
-    updateModeBtn();
     map.resize(); map.paint();
     map.focus(g.nations[g.player].cap, 2.6);
     bindGameUi();
     renderAll();
     updateBadge();
-  }
-
-  function updateModeBtn() {
-    const b = $('map-mode'); if (!b) return;
-    const flags = mapMode() === 'flags';
-    b.textContent = flags ? '🎨 Colors' : '🏳 Flags';
-    b.title = flags ? 'Show the map in plain nation colours' : 'Show every nation as its flag';
   }
 
   let uiBound = false;
@@ -193,7 +172,6 @@
     $('side-toggle').onclick = () => { $('side').classList.toggle('collapsed'); $('side-toggle').textContent = $('side').classList.contains('collapsed') ? '▴' : '▾'; };
     document.querySelectorAll('#clock [data-speed]').forEach(b => b.onclick = () => setSpeed(+b.dataset.speed));
     $('btn-menu').onclick = showMenu;
-    $('map-mode').onclick = () => { const m = mapMode() === 'flags' ? 'colors' : 'flags'; store.set('frontline-mapmode', m); if (map) map.setMode(m); updateModeBtn(); };
   }
   function setTab(t) {
     document.querySelectorAll('.tabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
@@ -314,7 +292,7 @@
     const div = list.reduce((t, x) => t + x.div, 0), org = list.reduce((t, x) => t + x.org * x.div, 0) / div;
     const state = x => x.battle ? 'Fighting' : x.retreat ? 'Retreating' : x.sea ? 'At sea' : x.route.length ? 'Moving to ' + (x.goal >= 0 ? data.provinces[x.goal].n : 'a point') : 'Holding';
     const title = list.length > 1 ? `${list.length} armies selected` : `Army in ${a.p >= 0 ? data.provinces[a.p].n : 'transit'}`;
-    card.innerHTML = `<button class="x" aria-label="Close">×</button><h3>${flagIcon(g, a.n, 18)}${esc(title)}</h3>
+    card.innerHTML = `<button class="x" aria-label="Close">×</button><h3><i class="swatch" style="background:${n.color}"></i>${esc(title)}</h3>
       <div class="rows"><span>Divisions</span><span>${div.toFixed(1)}</span><span>Morale</span><span>${Math.round(org)}%</span><span>Orders</span><span>${esc(list.length > 1 ? [...new Set(list.map(state))].join(', ') : state(a))}</span></div>
       <p class="meta">Tap <b>anywhere</b> on the map to send ${list.length > 1 ? 'them' : 'it'} there. Enemy land is taken as you march through it. ${sel.adding ? '<b>Tap more armies to add them.</b>' : ''}</p>
       <div class="acts"><button class="btn small" id="a-add">${sel.adding ? 'Stop adding' : '+ Add armies'}</button>${list.length === 1 && a.div >= 2 ? '<button class="btn small" id="a-split">Split</button>' : ''}${list.length > 1 ? '<button class="btn small" id="a-merge">Merge</button>' : ''}${list.some(x => x.route.length) ? '<button class="btn small" id="a-stop">Stop</button>' : ''}<button class="btn small" id="a-done">Done</button></div>`;
@@ -342,8 +320,8 @@
       acts += W.atWar(g, g.player, o) ? `<button class="btn small" id="p-peace">Offer peace</button>` : `<button class="btn small danger" id="p-war">Declare war</button>`;
     }
     card.innerHTML = `<button class="x" aria-label="Close">×</button><h3>${esc(pr.n)}</h3>
-      <div class="meta">${n ? `${flagIcon(g, o)} ${esc(n.name)}` : 'Unclaimed land'}${c !== o && c >= 0 ? ` · <span style="color:#ff9f6a">occupied by ${esc(g.nations[c].name)}</span>` : ''}${pr.c ? ' · coastal port' : ''}${g.nations.some(x => x.alive && x.cap === p) ? ' · capital' : ''}</div>
-      ${here.length ? here.map(a => `<div class="army-row">${flagIcon(g, a.n)}${esc(g.nations[a.n].name)}: ${a.div.toFixed(1)} div${a.n === g.player ? `<button class="btn small" data-army="${a.id}">Select</button>` : ''}</div>`).join('') : '<div class="meta">No armies here.</div>'}
+      <div class="meta">${n ? `<i class="swatch" style="background:${n.color}"></i> ${esc(n.name)}` : 'Unclaimed land'}${c !== o && c >= 0 ? ` · <span style="color:#ff9f6a">occupied by ${esc(g.nations[c].name)}</span>` : ''}${pr.c ? ' · coastal port' : ''}${g.nations.some(x => x.alive && x.cap === p) ? ' · capital' : ''}</div>
+      ${here.length ? here.map(a => `<div class="army-row"><i class="swatch" style="background:${g.nations[a.n].color}"></i>${esc(g.nations[a.n].name)}: ${a.div.toFixed(1)} div${a.n === g.player ? `<button class="btn small" data-army="${a.id}">Select</button>` : ''}</div>`).join('') : '<div class="meta">No armies here.</div>'}
       <div class="acts" style="margin-top:10px">${acts}</div>`;
     card.hidden = false;
     card.querySelector('.x').onclick = clearSel;
@@ -359,7 +337,7 @@
   function renderAll() { renderHud(); renderOrders(); renderArmy(); renderDiplo(); renderNews(); renderBattles(); }
   function renderHud() {
     const n = g.nations[g.player];
-    $('hud-color').style.cssText = flagStyle(g, g.player, 26); $('hud-name').textContent = n.name;
+    $('hud-color').style.background = n.color; $('hud-name').textContent = n.name;
     $('hud-date').textContent = n.leader || '';
     $('clock-date').textContent = W.dayLabel(g);
     const net = W.income(data, g, g.player) - W.upkeep(g, g.player);
@@ -415,7 +393,7 @@
       const r = rank(i);
       if (r !== cur) { html += `<h4>${groups[r]}</h4>`; cur = r; }
       const n = g.nations[i], rel = W.rel(g, i, me);
-      html += `<button class="nrow" data-n="${i}">${flagIcon(g, i)}<span>${esc(n.name)}</span><span class="tags">${n.great ? '<i class="tag great">great</i>' : ''}${W.atWar(g, me, i) ? '<i class="tag war">war</i>' : ''}${W.allied(g, me, i) ? '<i class="tag ally">ally</i>' : ''}<span class="relnum" style="color:${rel > 20 ? 'var(--green)' : rel < -20 ? 'var(--red)' : 'var(--dim)'}">${rel > 0 ? '+' : ''}${rel}</span></span></button>`;
+      html += `<button class="nrow" data-n="${i}"><i class="swatch" style="background:${n.color}"></i><span>${esc(n.name)}</span><span class="tags">${n.great ? '<i class="tag great">great</i>' : ''}${W.atWar(g, me, i) ? '<i class="tag war">war</i>' : ''}${W.allied(g, me, i) ? '<i class="tag ally">ally</i>' : ''}<span class="relnum" style="color:${rel > 20 ? 'var(--green)' : rel < -20 ? 'var(--red)' : 'var(--dim)'}">${rel > 0 ? '+' : ''}${rel}</span></span></button>`;
     }
     t.innerHTML = html;
     const inp = t.querySelector('.diplo-search');
@@ -535,7 +513,7 @@
   // ================================================================ diplomacy actions
   function showNation(i) {
     const n = g.nations[i], me = g.player, rel = W.rel(g, i, me), war = W.atWar(g, me, i), al = W.allied(g, me, i);
-    sheet(`<h2>${flagIcon(g, i, 22)} ${esc(n.name)}</h2>
+    sheet(`<h2><i class="swatch" style="background:${n.color};width:18px;height:18px"></i> ${esc(n.name)}</h2>
       <p>${esc(n.leader || 'Leader unknown')}${n.gov ? ' · ' + esc(n.gov) : ''}</p>
       <p>${n.great ? 'Great power' : 'Nation'} · ${Math.round(W.divisions(g, i))} divisions · economy ${Math.round(n.eco)} · stability ${Math.round(n.stab)}%<br>
       Their opinion of you: <b style="color:${rel > 20 ? 'var(--green)' : rel < -20 ? 'var(--red)' : 'var(--text)'}">${rel > 0 ? '+' : ''}${rel}</b>
@@ -585,7 +563,7 @@
   async function openChat(i, prefill, dealIn) {
     const n = g.nations[i], hist = (g.chats[i] = g.chats[i] || []);
     let pending = dealIn || null;
-    sheet(`<div class="head">${flagIcon(g, i, 26)}<div class="who"><b>${esc(n.leader || n.name)}</b><span>${esc(n.name)} · opinion of you <span id="c-rel"></span></span></div><button class="icon-btn" id="c-x" aria-label="Close">×</button></div>
+    sheet(`<div class="head"><i class="swatch" style="background:${n.color};width:16px;height:30px"></i><div class="who"><b>${esc(n.leader || n.name)}</b><span>${esc(n.name)} · opinion of you <span id="c-rel"></span></span></div><button class="icon-btn" id="c-x" aria-label="Close">×</button></div>
       <div class="log" id="c-log"></div>
       <div class="input"><div class="chips" id="c-chips"></div><div class="row"><textarea id="c-text" placeholder="Write to ${esc(n.leader || n.name)}…" maxlength="1500"></textarea><button class="btn primary" id="c-send">Send</button></div></div>`, 'chat');
     const log = $('c-log');
