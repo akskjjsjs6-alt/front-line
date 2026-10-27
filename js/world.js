@@ -214,19 +214,19 @@
   };
 
   const COLORS = {
-    'United Kingdom': '#c9474f', 'France': '#3d6fd1', 'Germany': '#6f6f6f', 'Russia': '#3f8a4f', 'USSR': '#a8322d', 'United States': '#2f4f9a',
-    'Austria-Hungary': '#d6c25a', 'Italy': '#5aa86b', 'Japan': '#e8e2d0', 'Ottoman Empire': '#5f9c8c', 'Qing China': '#d9a441', 'China': '#d9a441',
-    'Spain': '#e0b84f', 'Portugal': '#3a8a6a', 'Netherlands': '#e08a3c', 'Belgium': '#c79a2f', 'Poland': '#d97a90', 'Brazil': '#4caf6e',
-    'Canada': '#b8545d', 'Australia': '#3f7fb5', 'India': '#e39a4c', 'Iraq': '#7b9e52', 'Iran': '#4f9a83', 'Turkey': '#9e4b5b', 'Sweden': '#4f86c4',
-    'Sweden-Norway': '#4f86c4', 'Persia': '#4f9a83', 'Mexico': '#6b9a49', 'Argentina': '#8cb7dd', 'Czechoslovakia': '#5d86b6', 'Hungary': '#a87c4f',
-    'Romania': '#c8b04a', 'Yugoslavia': '#7a6cb0', 'Finland': '#cfd8e8', 'Egypt': '#c4a868', 'Saudi Arabia': '#4e8a43', 'Israel': '#7ea6d8',
-    'South Korea': '#6d8fc9', 'North Korea': '#a54a4a', 'Pakistan': '#3f7f4f', 'Ukraine': '#e0c64a', 'Mongolia': '#8a6b4f', 'Ethiopia': '#8fa84a'
+    'United Kingdom': '#c48a8d', 'France': '#879cc4', 'Germany': '#9e9e9e', 'Russia': '#88b492', 'USSR': '#bf807d', 'United States': '#7f92bd',
+    'Austria-Hungary': '#cfc79e', 'Italy': '#8eb196', 'Japan': '#cec8b5', 'Ottoman Empire': '#90aca5', 'Qing China': '#c8b48f', 'China': '#c8b48f',
+    'Spain': '#cfc19d', 'Portugal': '#86b6a3', 'Netherlands': '#c9ab91', 'Belgium': '#bfac7d', 'Poland': '#d6adb7', 'Brazil': '#87b597',
+    'Canada': '#bb8e92', 'Australia': '#82a0ba', 'India': '#cfb79d', 'Iraq': '#a0b18c', 'Iran': '#8bb1a5', 'Turkey': '#b38991', 'Sweden': '#8ea7c2',
+    'Sweden-Norway': '#8ea7c2', 'Persia': '#8bb1a5', 'Mexico': '#9bb389', 'Argentina': '#aec3d6', 'Czechoslovakia': '#94a7bc', 'Hungary': '#b39e89',
+    'Romania': '#c4b98c', 'Yugoslavia': '#a49ebb', 'Finland': '#b5becf', 'Egypt': '#c8bca1', 'Saudi Arabia': '#90b28a', 'Israel': '#aec0d5',
+    'South Korea': '#a6b5cd', 'North Korea': '#b48888', 'Pakistan': '#8bb294', 'Ukraine': '#cdc49a', 'Mongolia': '#ae9d8e', 'Ethiopia': '#a9b588'
   };
 
   // ------------------------------------------------------------------ helpers
   function hashColor(name) {
     let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) | 0;
-    const hue = ((h >>> 0) % 360), s = 35 + ((h >>> 9) % 25), l = 48 + ((h >>> 17) % 16);
+    const hue = ((h >>> 0) % 360), s = 20 + ((h >>> 9) % 14), l = 62 + ((h >>> 17) % 12);
     return hsl(hue, s, l);
   }
   function hsl(h, s, l) {
