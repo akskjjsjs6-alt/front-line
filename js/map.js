@@ -317,37 +317,69 @@ onmessage = (e) => {
       }
       this.labelsDirty = true; this.version++;
     }
+    // Nation names: the main one on the land around the capital, smaller ones on big detached pieces (colonies).
+    // Each name is laid along the piece's long axis and trimmed so it only runs over the nation's own land.
     computeLabels() {
       const g = this.opts.state(), data = this.data, geo = this.geo, out = [];
       const byNation = new Map();
       g.owner.forEach((o, i) => { if (o >= 0) { if (!byNation.has(o)) byNation.set(o, []); byNation.get(o).push(i); } });
       for (const [n, list] of byNation) {
         if (!g.nations[n].alive) continue;
-        // the largest connected block of the nation's provinces
-        const inSet = new Set(list), seen = new Set();
-        let best = null, ba = 0;
+        // connected blocks of the nation's land
+        const inSet = new Set(list), seen = new Set(), comps = [];
         for (const s of list) {
           if (seen.has(s)) continue;
           const comp = [], q = [s]; seen.add(s);
           while (q.length) { const p = q.pop(); comp.push(p); for (const x of data.provinces[p].nb) if (inSet.has(x) && !seen.has(x)) { seen.add(x); q.push(x); } }
-          const area = comp.reduce((t, p) => t + data.provinces[p].a, 0);
-          if (area > ba) { ba = area; best = comp; }
+          comps.push({ provs: comp, set: new Set(comp), area: comp.reduce((t, p) => t + data.provinces[p].a, 0) });
         }
-        // centre and main axis (weighted by area)
-        let sw = 0, mx = 0, my = 0;
-        for (const p of best) { const w = data.provinces[p].a + 2; sw += w; mx += geo.provs[p].lx * w; my += geo.provs[p].ly * w; }
-        mx /= sw; my /= sw;
-        let sxx = 0, syy = 0, sxy = 0;
-        for (const p of best) { const w = data.provinces[p].a + 2, dx = geo.provs[p].lx - mx, dy = geo.provs[p].ly - my; sxx += w * dx * dx; syy += w * dy * dy; sxy += w * dx * dy; }
-        let ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
-        if (ang > Math.PI / 2) ang -= Math.PI; if (ang < -Math.PI / 2) ang += Math.PI;
-        ang = Math.max(-0.5, Math.min(0.5, ang));
-        let lo = Infinity, hi = -Infinity;
-        for (const p of best) { const [a, b, c, d] = geo.provs[p].box; for (const [x, y] of [[a, b], [c, d], [a, d], [c, b]]) { const t = (x - mx) * Math.cos(ang) + (y - my) * Math.sin(ang); lo = Math.min(lo, t); hi = Math.max(hi, t); } }
-        const len = Math.max(5, (hi - lo) * 0.62);
-        out.push({ n, x: mx, y: my, ang, len, area: ba });
+        comps.sort((a, b) => b.area - a.area);
+        const cap = g.nations[n].cap, home = comps.find(c => c.set.has(cap)) || comps[0];
+        for (const c of comps) {
+          const main = c === home;
+          if (!main && c.area < Math.max(120, comps[0].area * 0.2)) continue;
+          const L = this.placeLabel(c);
+          if (L) out.push({ n, ...L, area: c.area, main });
+        }
       }
+      // big names first; main names before colony names of the same size
+      out.sort((a, b) => (b.main - a.main) || (b.area - a.area));
       return out;
+    }
+    placeLabel(c) {
+      const data = this.data, geo = this.geo, own = p => p >= 0 && c.set.has(p);
+      // centre and main axis (weighted by area)
+      let sw = 0, mx = 0, my = 0;
+      for (const p of c.provs) { const w = data.provinces[p].a + 2; sw += w; mx += geo.provs[p].lx * w; my += geo.provs[p].ly * w; }
+      mx /= sw; my /= sw;
+      let sxx = 0, syy = 0, sxy = 0;
+      for (const p of c.provs) { const w = data.provinces[p].a + 2, dx = geo.provs[p].lx - mx, dy = geo.provs[p].ly - my; sxx += w * dx * dx; syy += w * dy * dy; sxy += w * dx * dy; }
+      let ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+      if (ang > Math.PI / 2) ang -= Math.PI; if (ang < -Math.PI / 2) ang += Math.PI;
+      ang = Math.max(-0.5, Math.min(0.5, ang));
+      // the centre of an odd-shaped country can fall outside it: start from its own province nearest the centre
+      if (!own(geo.at(mx, my))) {
+        let best = null, bd = Infinity;
+        for (const p of c.provs) { const d = (geo.provs[p].lx - mx) ** 2 + (geo.provs[p].ly - my) ** 2; if (d < bd) { bd = d; best = p; } }
+        mx = geo.provs[best].lx; my = geo.provs[best].ly;
+      }
+      // walk along the axis both ways while still on our land (small bays and lakes are allowed)
+      let lo = Infinity, hi = -Infinity;
+      for (const p of c.provs) { const [a, b, x2, y2] = geo.provs[p].box; for (const [x, y] of [[a, b], [x2, y2], [a, y2], [x2, b]]) { const t = (x - mx) * Math.cos(ang) + (y - my) * Math.sin(ang); lo = Math.min(lo, t); hi = Math.max(hi, t); } }
+      const span = Math.max(hi, -lo), step = Math.max(0.4, span / 40), ca = Math.cos(ang), sa = Math.sin(ang);
+      const run = dir => {
+        let t = 0, miss = 0, last = 0;
+        while (t < span) {
+          t += step;
+          if (own(geo.at(mx + ca * t * dir, my + sa * t * dir))) { last = t; miss = 0; } else if (++miss > 2) break;
+        }
+        return last;
+      };
+      const a = run(-1), b = run(1);
+      const len = (a + b) * 0.92;
+      if (len < 3) return { x: mx, y: my, ang, len: Math.max(3, Math.sqrt(c.area) * 0.6) };
+      const mid = (b - a) / 2;
+      return { x: mx + ca * mid, y: my + sa * mid, ang, len };
     }
 
     // ---------------------------------------------------------------- camera
@@ -774,15 +806,28 @@ onmessage = (e) => {
         const sp = this.starSprite(Math.min(8, 3 + z * 0.8), Math.min(3.4, 1.3 + z * 0.35));
         c.drawImage(sp.cv, x - sp.w / 2, y - sp.w / 2, sp.w, sp.w);
       }
-      // nation names, along the country's main axis
+      // nation names, along the country's main axis; a name that would overlap one already placed shrinks or is left out
+      const placed = [];
+      const hits = (x, y, w, h, ang) => {
+        const ex = Math.abs(Math.cos(ang)) * w / 2 + Math.abs(Math.sin(ang)) * h / 2, ey = Math.abs(Math.sin(ang)) * w / 2 + Math.abs(Math.cos(ang)) * h / 2;
+        return placed.some(r => Math.abs(r.x - x) < r.ex + ex && Math.abs(r.y - y) < r.ey + ey) ? null : { x, y, ex, ey };
+      };
       for (const L of this.labels || []) {
         const n = g.nations[L.n]; if (!n.alive) continue;
         const name = n.name.toUpperCase();
         let fs = L.len * z / (name.length * 0.72 + 1);
-        fs = Math.min(fs, 16 + Math.sqrt(L.area) * z * 0.05, 64);
+        fs = Math.min(fs, 16 + Math.sqrt(L.area) * z * 0.05, L.main ? 64 : 34);
         if (fs < 8.5) continue;
         const [x, y] = this.toS(L.x, L.y);
         if (x < -300 || y < -100 || x > this.sw + 300 || y > this.sh + 100) continue;
+        let box = null;
+        for (const k of [1, 0.75, 0.55]) {
+          const f = fs * k; if (f < 8.5) break;
+          box = hits(x, y, name.length * f * 0.82, f * 1.15, L.ang);
+          if (box) { fs = f; break; }
+        }
+        if (!box) continue;
+        placed.push(box);
         c.save(); c.translate(x, y); c.rotate(L.ang);
         c.font = `600 ${fs}px "Source Serif 4", Georgia, serif`;
         if ('letterSpacing' in c) c.letterSpacing = `${Math.round(fs * 0.18)}px`;
