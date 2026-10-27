@@ -129,7 +129,17 @@ def tidy_name(name):
         words.pop(0)
     if len(words) > 1 and words[-1].isdigit():
         words.pop()
+    if any(w.strip('-') in DIRS + GENERIC for w in ' '.join(words).replace('-', ' ').split()):
+        first = None                                   # 'Far North', 'Matabeleland South': no second direction
     return ' '.join(([first] if first else []) + words)
+
+
+GENERIC = ['North', 'South', 'East', 'West', 'Northern', 'Southern', 'Eastern', 'Western', 'Central', 'Far', 'Upper', 'Lower']
+
+
+def generic(name):
+    """'Northern', 'North West', 'North-Eastern': names that say nothing without their country."""
+    return all(w in DIRS + GENERIC for w in name.replace('-', ' ').split())
 
 
 def split_large(r, limit=320000):
@@ -395,6 +405,9 @@ def build(year, regions, cities):
         hit = ptree.query(pt, predicate='intersects')
         if len(hit) and (cp.get('pop_max') or 0) > best.get(int(hit[0]), (-1, ''))[0]:
             best[int(hit[0])] = (cp.get('pop_max') or 0, cp['name'])
+    for p in provs:                                    # 'Northern' -> 'Northern (Zambia)'
+        if not p.get('gen') and generic(p['name']) and p.get('country'):
+            p['name0'], p['name'] = p['name'], f"{p['name']} ({p['country']})"
     taken = {p['name'] for p in provs if not p.get('gen')}
     for i, p in enumerate(provs):
         if not p.get('gen'):

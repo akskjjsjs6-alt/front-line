@@ -11,7 +11,7 @@
   const RAJ = PRINCELY.map(n => ['United Kingdom', n]);
   const PERIODS = {
     '1900': {
-      id: '1900', file: 'data/world-1900.json?v=5', start: [1900, 1], title: 'The Age of Empires', speed: 14, recruitCost: 6,
+      id: '1900', file: 'data/world-1900.json?v=6', start: [1900, 1], title: 'The Age of Empires', speed: 14, recruitCost: 6,
       blurb: 'Queen Victoria still reigns. Europe\'s empires cover the globe, the Boer War rages and China simmers. Fourteen years of peace remain, unless someone breaks it sooner.',
       units: { inf: 0.7, recon: 0.2, art: 0.1 },
       wars: [['United Kingdom', 'Transvaal'], ['United Kingdom', 'Orange Free State']],
@@ -19,7 +19,7 @@
       hostile: [['France', 'Germany', -45], ['Russia', 'Japan', -40], ['United Kingdom', 'Russia', -25], ['Austria-Hungary', 'Serbia', -30], ['Russia', 'Ottoman Empire', -35], ['United Kingdom', 'France', -15]]
     },
     '1939': {
-      id: '1939', file: 'data/world-1939.json?v=5', start: [1939, 3], title: 'The Gathering Storm', speed: 22, recruitCost: 8,
+      id: '1939', file: 'data/world-1939.json?v=6', start: [1939, 3], title: 'The Gathering Storm', speed: 22, recruitCost: 8,
       blurb: 'Germany has swallowed Austria and eyes Poland. Japan is at war in China. Britain and France promise to defend Poland. The world holds its breath.',
       units: { inf: 0.55, mech: 0.15, armor: 0.12, recon: 0.06, art: 0.1, ad: 0.02 },
       wars: [['Japan', 'China']],
@@ -27,7 +27,7 @@
       hostile: [['Germany', 'Poland', -50], ['Germany', 'France', -40], ['Germany', 'United Kingdom', -25], ['USSR', 'Germany', -35], ['Japan', 'USSR', -45], ['Japan', 'United States', -30], ['Italy', 'France', -25], ['Hungary', 'Romania', -35], ['Germany', 'Czechoslovakia', -60]]
     },
     '2003': {
-      id: '2003', file: 'data/world-2003.json?v=5', start: [2003, 1], title: 'The New Century', speed: 32, recruitCost: 14,
+      id: '2003', file: 'data/world-2003.json?v=6', start: [2003, 1], title: 'The New Century', speed: 32, recruitCost: 14,
       blurb: 'The only superpower prepares to invade Iraq. Russia rebuilds under Putin, China rises fast, and old feuds smoulder from Kashmir to Korea.',
       units: { inf: 0.3, mech: 0.25, armor: 0.2, recon: 0.07, art: 0.08, mlrs: 0.04, ad: 0.02, heli: 0.03, uas: 0.01 },
       wars: [],
@@ -200,7 +200,7 @@
       'Vietnam': [20, 0.8, 30, 'Communist one-party state', 'General Secretary Nông Đức Mạnh'],
       'Greece': [8, 1.1, 60, 'Republic', 'PM Costas Simitis'],
       'Georgia': [2, 0.8, 15, 'Republic', 'President Eduard Shevardnadze'],
-      'Serbia': [6, 0.85, 20, 'Federal republic', 'President Milan Milutinović'],
+      'Yugoslavia': [7, 0.85, 20, 'Federal republic (Serbia and Montenegro)', 'President Vojislav Koštunica'],
       'Ethiopia': [12, 0.65, 15, 'Federal republic', 'PM Meles Zenawi'],
       'Eritrea': [6, 0.65, 10, 'One-party state', 'President Isaias Afwerki'],
       'Kuwait': [2, 1.0, 50, 'Emirate', 'Emir Jaber Al-Ahmad Al-Sabah'],

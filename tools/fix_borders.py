@@ -158,11 +158,12 @@ def rules_1939(c, owner, name):
     return None
 
 
-CAPITALS = {'1939': {'China': 'Chongqing', 'Slovakia': 'Bratislava'}}   # China's wartime capital: Nanjing had fallen in 1937
+CAPITALS = {'1939': {'China': 'Chongqing', 'Slovakia': 'Bratislava'}, '2003': {'Yugoslavia': 'Belgrade'}}   # China's wartime capital: Nanjing had fallen in 1937
 
 # 2003: land belongs to the country it lies in today, with these exceptions and renamings
 SOVEREIGN_2003 = {
-    'Hong Kong S.A.R.': 'China', 'Macau S.A.R': 'China', 'S. Sudan': 'Sudan', 'Somaliland': 'Somalia', 'Kosovo': 'Serbia',
+    'Hong Kong S.A.R.': 'China', 'Macau S.A.R': 'China', 'S. Sudan': 'Sudan', 'Somaliland': 'Somalia',
+    'Kosovo': 'Yugoslavia', 'Montenegro': 'Yugoslavia',   # one state until 4 February 2003
     'Western Sahara': 'Morocco', 'Gaza Strip': 'Israel', 'West Bank': 'Israel', 'Northern Cyprus': 'Turkey', 'Siachen Glacier': 'India',
     'Baykonur Cosmodrome': 'Kazakhstan', 'Aland': 'Finland', 'Greenland': 'Denmark', 'Faroe Islands': 'Denmark',
     'United States of America': US, 'Puerto Rico': US, 'US Naval Base Guantanamo Bay': US, 'Guam': US, 'Northern Mariana Islands': US,
@@ -175,7 +176,7 @@ SOVEREIGN_2003 = {
     'Aruba': NL, 'Curaçao': NL, 'Caribbean Netherlands': NL, 'Sint Maarten': NL,
     'Norfolk Island': 'Australia', 'Heard Island': 'Australia', 'Indian Ocean Territories': 'Australia', 'Ashmore and Cartier': 'Australia',
     'Cook Islands': 'New Zealand', 'Niue': 'New Zealand',
-    'Republic of Serbia': 'Serbia', 'Democratic Republic of the Congo': 'DR Congo', 'Republic of the Congo': 'Congo',
+    'Republic of Serbia': 'Yugoslavia', 'Democratic Republic of the Congo': 'DR Congo', 'Republic of the Congo': 'Congo',
     'United Republic of Tanzania': 'Tanzania', 'The Bahamas': 'Bahamas', 'Trinidad and Tobago': 'Trinidad', 'Guinea Bissau': 'Guinea-Bissau',
     'eSwatini': 'Swaziland', 'North Macedonia': 'Macedonia', 'Federated States of Micronesia': 'Micronesia',
     'Sao Tome and Principe': 'São Tomé and Príncipe', 'Czechia': 'Czech Republic',
