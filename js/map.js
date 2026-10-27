@@ -11,6 +11,63 @@
   const TS = 256, S0 = 0.125, MAXL = 10;          // tile size in device px; level 0 scale (device px per world unit)
   const MAXZ = 16;                                // max zoom in CSS px per world unit: past this the relief art and data soften out
 
+  // Map looks. sea: colour and texture ('waves', 'grain' or 'none'); land: colour under the nations;
+  // relief: how much terrain shading shows (0-1); fill: nation colour opacity, saturation and lightness
+  // (-1 darker .. 1 white); prov/coast/nation: border colours and widths; ink/halo: label colours.
+  const STYLES = {
+    atlas: { name: 'Atlas', sea: '#39abed', seaTex: 'waves', bg: '#39abed', land: '#e4eaeb', relief: 1, wash: 0.18,
+      fill: { a: 0.6, sat: 1, light: 0, mode: 'multiply' }, prov: 'rgba(40,50,55,0.28)', coast: ['rgba(0,0,0,0.85)', 0.9], nation: ['rgba(0,0,0,0.9)', 1],
+      ink: 'rgba(47,52,55,0.92)', halo: 'rgba(255,255,255,0.6)' },
+    paper: { name: 'Paper', sea: '#d6e4e6', seaTex: 'grain', bg: '#d6e4e6', land: '#f3eee3', relief: 0.25, wash: 0.5,
+      fill: { a: 0.75, sat: 0.55, light: 0.35, mode: 'source-over' }, prov: 'rgba(90,80,60,0.18)', coast: ['rgba(90,110,115,0.7)', 0.8], nation: ['rgba(80,70,55,0.75)', 0.9],
+      ink: 'rgba(70,62,50,0.9)', halo: 'rgba(250,247,240,0.7)' },
+    nordic: { name: 'Nordic', sea: '#a8c4d4', seaTex: 'none', bg: '#a8c4d4', land: '#f2f4f5', relief: 0.15, wash: 0.5,
+      fill: { a: 0.85, sat: 0.45, light: 0.3, mode: 'source-over' }, prov: 'rgba(255,255,255,0.45)', coast: ['rgba(255,255,255,0.9)', 1.1], nation: ['#ffffff', 1.6],
+      ink: 'rgba(40,55,65,0.85)', halo: 'rgba(255,255,255,0.55)' },
+    midnight: { name: 'Midnight', sea: '#101a26', seaTex: 'grain', bg: '#101a26', land: '#2a3138', relief: 0.35, wash: 0,
+      fill: { a: 0.85, sat: 0.6, light: -0.35, mode: 'source-over' }, prov: 'rgba(255,255,255,0.08)', coast: ['rgba(140,170,190,0.55)', 0.8], nation: ['rgba(220,230,240,0.55)', 1],
+      ink: 'rgba(225,232,238,0.9)', halo: 'rgba(10,16,24,0.6)' },
+    ink: { name: 'Ink', sea: '#eef2f3', seaTex: 'none', bg: '#eef2f3', land: '#ffffff', relief: 0, wash: 0,
+      fill: { a: 0.9, sat: 0.35, light: 0.6, mode: 'source-over' }, prov: 'rgba(0,0,0,0.12)', coast: ['#1b1f22', 0.9], nation: ['#1b1f22', 1.1],
+      ink: 'rgba(20,24,27,0.92)', halo: 'rgba(255,255,255,0.75)' },
+    terrain: { name: 'Terrain', sea: '#8fb8cc', seaTex: 'waves', bg: '#8fb8cc', land: '#e6e2d6', relief: 1, wash: 0.05,
+      fill: { a: 0.38, sat: 0.9, light: 0, mode: 'multiply' }, prov: 'rgba(40,40,35,0.2)', coast: ['rgba(50,70,80,0.7)', 0.8], nation: ['rgba(45,40,35,0.8)', 1.2],
+      ink: 'rgba(45,40,35,0.9)', halo: 'rgba(255,255,255,0.55)' },
+    pastel: { name: 'Pastel', sea: '#bfe3ee', seaTex: 'none', bg: '#bfe3ee', land: '#fbfbfb', relief: 0, wash: 0,
+      fill: { a: 0.95, sat: 1.15, light: 0.45, mode: 'source-over' }, prov: 'rgba(255,255,255,0.6)', coast: ['rgba(255,255,255,0.95)', 1.2], nation: ['#ffffff', 1.8],
+      ink: 'rgba(60,70,80,0.85)', halo: 'rgba(255,255,255,0.6)' },
+    slate: { name: 'Slate', sea: '#46637a', seaTex: 'grain', bg: '#46637a', land: '#d9d6cf', relief: 0.3, wash: 0.2,
+      fill: { a: 0.8, sat: 0.5, light: 0.15, mode: 'source-over' }, prov: 'rgba(0,0,0,0.1)', coast: ['rgba(20,30,40,0.6)', 0.8], nation: ['rgba(30,35,40,0.7)', 1],
+      ink: 'rgba(35,40,45,0.9)', halo: 'rgba(255,255,255,0.55)' },
+    lagoon: { name: 'Lagoon', sea: '#39abed', seaTex: 'grain', bg: '#39abed', land: '#f7f7f5', relief: 0.1, wash: 0.4,
+      fill: { a: 0.9, sat: 0.6, light: 0.4, mode: 'source-over' }, prov: 'rgba(255,255,255,0.5)', coast: ['rgba(255,255,255,0.9)', 1.1], nation: ['#ffffff', 1.6],
+      ink: 'rgba(40,55,70,0.88)', halo: 'rgba(255,255,255,0.6)' },
+    sepia: { name: 'Sepia', sea: '#c8d3c4', seaTex: 'grain', bg: '#c8d3c4', land: '#ece2cc', relief: 0.45, wash: 0.25,
+      fill: { a: 0.55, sat: 0.35, light: 0.1, mode: 'multiply' }, prov: 'rgba(90,70,40,0.18)', coast: ['rgba(90,75,55,0.75)', 0.8], nation: ['rgba(85,60,35,0.8)', 1.1],
+      ink: 'rgba(80,60,38,0.9)', halo: 'rgba(245,238,222,0.7)' }
+  };
+  let styleId = 'atlas';
+  try {
+    const q = typeof location !== 'undefined' && new URLSearchParams(location.search).get('style');
+    const saved = typeof localStorage !== 'undefined' && localStorage.getItem('frontline-map-style');
+    if (q && STYLES[q]) styleId = q; else if (saved && STYLES[saved]) styleId = saved;
+  } catch (e) { /* storage blocked: keep the default */ }
+  const style = () => STYLES[styleId];
+  // A nation colour reshaped for the current style: saturation scaled, lightness pushed toward white or black.
+  function tone(hex, f) {
+    const n = parseInt(hex.slice(1), 16), r = (n >> 16 & 255) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    let h = 0, s = 0, l = (mx + mn) / 2;
+    if (mx !== mn) {
+      const d = mx - mn; s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+      h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h *= 60;
+    }
+    s = Math.min(1, s * f.sat); l = f.light >= 0 ? l + (1 - l) * f.light : l * (1 + f.light);
+    const k = m => (m + h / 30) % 12, a = s * Math.min(l, 1 - l);
+    const c = m => Math.round(255 * (l - a * Math.max(-1, Math.min(k(m) - 3, Math.min(9 - k(m), 1)))));
+    return '#' + [c(0), c(8), c(4)].map(v => v.toString(16).padStart(2, '0')).join('');
+  }
+
   let reliefImg = null;
   function relief() {
     if (!reliefImg) { reliefImg = new Image(); reliefImg.src = 'data/relief.jpg'; }
@@ -140,7 +197,8 @@
       if (!g.nations[a].alive) continue;
       for (let b = a + 1; b < g.nations.length; b++) if (root.World.atWar(g, a, b)) wars.add(a * 512 + b);
     }
-    return { owner: g.owner, ctrl: g.ctrl, colors: g.nations.map(n => n.color), wars };
+    const st = style();
+    return { owner: g.owner, ctrl: g.ctrl, colors: g.nations.map(n => tone(n.color, st.fill)), wars, style: st };
   }
   function wDecode(pkt) {
     // worker side of prepare(): rebuild paintable paths and the spatial index from a packet
@@ -184,14 +242,14 @@
     return { W: pkt.W, H: pkt.H, arcs: pkt.arcs, provs, users: pkt.users, provsIn: (x0, y0, x1, y1) => query(grid, provBoxes, x0, y0, x1, y1), arcsIn: (x0, y0, x1, y1) => query(arcGrid, arcBox, x0, y0, x1, y1) };
   }
   function tilePainter(env, job) {
-    const geo = env.geo, ST = env.state, TS = env.ts, ctx = job.cv.getContext('2d');
+    const geo = env.geo, ST = env.state, SY = ST.style, TS = env.ts, ctx = job.cv.getContext('2d');
     const sc = env.s0 * 2 ** job.L, tw = TS / sc;
     const x0 = job.tx * tw, y0 = job.ty * tw, x1 = x0 + tw, y1 = y0 + tw;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#e4eaeb'; ctx.fillRect(0, 0, TS, TS);
+    ctx.fillStyle = SY.land; ctx.fillRect(0, 0, TS, TS);
     ctx.setTransform(sc, 0, 0, sc, -x0 * sc, -y0 * sc);
     const img = env.relief;
-    if (img && img.complete !== false && (img.naturalWidth || img.width)) {
+    if (SY.relief > 0 && img && img.complete !== false && (img.naturalWidth || img.width)) {
       const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
       const kx = iw / geo.W, ky = ih / geo.H;
       const rx0 = Math.max(0, x0), ry0 = Math.max(0, y0), rx1 = Math.min(geo.W, x1), ry1 = Math.min(geo.H, y1);
@@ -200,13 +258,11 @@
         const over = sc / job.dpr / (iw / geo.W);
         const alpha = over <= 1.6 ? 1 : Math.max(0.5, 1 - (over - 1.6) / 5);
         // the relief keeps only its light and shade, tinted a pale grey-blue: colour comes from the nations
-        ctx.globalAlpha = alpha; ctx.globalCompositeOperation = 'luminosity';
+        ctx.globalAlpha = alpha * SY.relief; ctx.globalCompositeOperation = 'luminosity';
         ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'medium';
         ctx.drawImage(img, rx0 * kx, ry0 * ky, (rx1 - rx0) * kx, (ry1 - ry0) * ky, rx0, ry0, rx1 - rx0, ry1 - ry0);
         ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(x0, y0, tw, tw);
-        ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = 'rgba(160,184,194,0.4)'; ctx.fillRect(x0, y0, tw, tw);
-        ctx.globalCompositeOperation = 'source-over';
+        if (SY.wash) { ctx.fillStyle = `rgba(255,255,255,${SY.wash})`; ctx.fillRect(x0, y0, tw, tw); }
       }
     }
     const pad = 1 / sc;
@@ -214,7 +270,7 @@
     // textured blue sea so the land reads on its own
     const sea = new Path2D(); sea.rect(x0 - pad, y0 - pad, tw + 2 * pad, tw + 2 * pad);
     for (const i of ids) sea.addPath(geo.provs[i].path);
-    ctx.fillStyle = seaTexture(ctx, sc / job.dpr); ctx.fill(sea, 'evenodd');
+    ctx.fillStyle = seaTexture(ctx, sc / job.dpr, SY.sea, SY.seaTex); ctx.fill(sea, 'evenodd');
     // nation colours over the terrain; occupied land striped in the occupier's colour
     const byOwner = new Map(), occ = new Map();
     for (const i of ids) {
@@ -224,7 +280,7 @@
       if (ct >= 0 && ct !== o) { let q = occ.get(ct); if (!q) occ.set(ct, q = new Path2D()); q.addPath(geo.provs[i].path); }
     }
     // multiplied over the relief, so mountains and valleys show through the colour
-    ctx.globalAlpha = 0.6; ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = SY.fill.a; ctx.globalCompositeOperation = SY.fill.mode;
     for (const [o, p] of byOwner) { ctx.fillStyle = ST.colors[o]; ctx.fill(p); }
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 0.85;
     for (const [o, p] of occ) { ctx.fillStyle = stripes(ctx, ST.colors[o], sc / job.dpr); ctx.fill(p); }
@@ -242,9 +298,9 @@
     // widths in screen px; tiles are shown at 50-100% of their native size, so draw lines a bit heavier
     const z = sc / job.dpr, px = w => w * 1.3 / z;
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    if (z > 0.9 && prov.length) { ctx.strokeStyle = `rgba(40,50,55,${Math.min(0.28, (z - 0.9) * 0.25)})`; ctx.lineWidth = px(0.7); ctx.stroke(arcPath(geo, prov)); }
-    if (coast.length) { ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = px(0.9); ctx.stroke(arcPath(geo, coast)); }
-    if (nation.length) { ctx.strokeStyle = 'rgba(0,0,0,0.9)'; ctx.lineWidth = px(Math.max(1, Math.min(2.2, z * 0.6))); ctx.stroke(arcPath(geo, nation)); }
+    if (z > 0.9 && prov.length) { ctx.strokeStyle = SY.prov; ctx.globalAlpha = Math.min(1, (z - 0.9) * 0.9); ctx.lineWidth = px(0.7); ctx.stroke(arcPath(geo, prov)); ctx.globalAlpha = 1; }
+    if (coast.length) { ctx.strokeStyle = SY.coast[0]; ctx.lineWidth = px(SY.coast[1]); ctx.stroke(arcPath(geo, coast)); }
+    if (nation.length) { ctx.strokeStyle = SY.nation[0]; ctx.lineWidth = px(SY.nation[1] * Math.max(1, Math.min(2.2, z * 0.6))); ctx.stroke(arcPath(geo, nation)); }
     if (front.length && job.front) {
       const p = arcPath(geo, front);
       ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = px(4.5); ctx.stroke(p);
@@ -267,7 +323,7 @@ onmessage = (e) => {
     TSZ = m.ts;
     postMessage({ t: 'ready' });
   } else if (m.t === 'state') {
-    STATE = { owner: m.owner, ctrl: m.ctrl, colors: m.colors, wars: m.wars };
+    STATE = { owner: m.owner, ctrl: m.ctrl, colors: m.colors, wars: m.wars, style: m.style };
   } else if (m.t === 'job') {
     // paint on a canvas owned by the worker (a canvas with a context can't be transferred),
     // then hand the finished pixels over as a transferable ImageBitmap
@@ -556,7 +612,7 @@ onmessage = (e) => {
         if (this.tiles.get(t.k) !== t) continue;           // evicted meanwhile
         if (this.statePktVer !== this.version) {           // game state changed: brief the painters
           const s = statePack(this.opts.state());
-          for (const x of this.wks) x.w.postMessage({ t: 'state', ver: this.version, owner: s.owner, ctrl: s.ctrl, colors: s.colors, wars: s.wars });
+          for (const x of this.wks) x.w.postMessage({ t: 'state', ver: this.version, owner: s.owner, ctrl: s.ctrl, colors: s.colors, wars: s.wars, style: s.style });
           this.statePktVer = this.version;
         }
         e.busy = true;
@@ -792,13 +848,14 @@ onmessage = (e) => {
       if (z > 3.2) {
         const fs = Math.min(15, 6 + z * 0.9);
         c.font = `500 ${fs}px Montserrat, "Helvetica Neue", Arial, sans-serif`;
-        c.lineJoin = 'round'; c.lineWidth = 2; c.strokeStyle = 'rgba(255,255,255,0.5)'; c.fillStyle = 'rgba(47,52,55,0.85)';
+        c.lineJoin = 'round'; c.lineWidth = 2; c.strokeStyle = style().halo; c.fillStyle = style().ink; c.globalAlpha = 0.9;
         for (const i of geo.provsIn(x0, y0, x1, y1)) {
           const pr = geo.provs[i], name = data.provinces[i].n;
           if ((pr.box[2] - pr.box[0]) * z < this.textWidth(c, name) * fs * 0.9) continue;
           const [x, y] = this.toS(pr.lx, pr.ly);
           c.strokeText(name, x, y + fs * 0.9); c.fillText(name, x, y + fs * 0.9);
         }
+        c.globalAlpha = 1;
       }
       // capitals
       for (const n of g.nations) {
@@ -833,8 +890,8 @@ onmessage = (e) => {
         c.save(); c.translate(x, y); c.rotate(L.ang);
         c.font = `700 ${fs}px Montserrat, "Helvetica Neue", Arial, sans-serif`;
         if ('letterSpacing' in c) c.letterSpacing = `${Math.round(fs * 0.08)}px`;
-        c.lineJoin = 'round'; c.lineWidth = Math.max(2, fs / 6); c.strokeStyle = 'rgba(255,255,255,0.6)'; c.strokeText(name, 0, 0);
-        c.fillStyle = 'rgba(47,52,55,0.92)'; c.fillText(name, 0, 0);
+        c.lineJoin = 'round'; c.lineWidth = Math.max(2, fs / 6); c.strokeStyle = style().halo; c.strokeText(name, 0, 0);
+        c.fillStyle = style().ink; c.fillText(name, 0, 0);
         if ('letterSpacing' in c) c.letterSpacing = '0px';
         c.restore();
       }
@@ -878,7 +935,7 @@ onmessage = (e) => {
       const { ctx, cam, geo } = this, z = cam.z;
       this.drawnVer = this.version; this.drawnCam = { x: cam.x, y: cam.y, z: cam.z };
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = '#39abed'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
+      ctx.fillStyle = style().bg; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
       this.drawTiles(ctx, now);
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.drawLabels(ctx, now);
@@ -1036,14 +1093,16 @@ onmessage = (e) => {
   // run inside a Web Worker too (document.createElement is unavailable there).
   // Sea texture: the sea colour with soft wave strokes and a little grain, sized in screen pixels
   // and anchored to the world origin so neighbouring tiles line up. Closure-free like stripes().
-  function seaTexture(ctx, z) {
-    let base = seaTexture.base;
+  function seaTexture(ctx, z, color, kind) {
+    if (kind === 'none') return color;
+    if (!seaTexture.cache) seaTexture.cache = new Map();
+    let base = seaTexture.cache.get(color + kind);
     if (!base) {
       const S = 160;
       base = typeof document !== 'undefined' && document.createElement ? document.createElement('canvas') : new OffscreenCanvas(S, S);
       base.width = base.height = S;
       const c = base.getContext('2d');
-      c.fillStyle = '#39abed'; c.fillRect(0, 0, S, S);
+      c.fillStyle = color; c.fillRect(0, 0, S, S);
       let seed = 7;
       const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
       // grain
@@ -1053,7 +1112,7 @@ onmessage = (e) => {
       }
       // short wave strokes, drawn three times over so they wrap across the tile edges
       c.lineCap = 'round'; c.lineWidth = 1.2;
-      for (let i = 0; i < 26; i++) {
+      for (let i = 0; i < (kind === 'waves' ? 26 : 0); i++) {
         const x = rnd() * S, y = rnd() * S, w = 10 + rnd() * 14, light = rnd() < 0.6;
         c.strokeStyle = light ? 'rgba(255,255,255,0.22)' : 'rgba(12,70,120,0.16)';
         for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) {
@@ -1063,7 +1122,7 @@ onmessage = (e) => {
           c.stroke();
         }
       }
-      seaTexture.base = base;
+      seaTexture.cache.set(color + kind, base);
     }
     const pat = ctx.createPattern(base, 'repeat');
     if (pat.setTransform) pat.setTransform(new DOMMatrix().scale(1 / z));
@@ -1093,16 +1152,16 @@ onmessage = (e) => {
   // Small political map for the start screen.
   function renderPreview(cv, data, state) {
     const geo = prepare(data), c = cv.getContext('2d');
-    const s = Math.max(cv.width / geo.W, cv.height / geo.H);
-    c.fillStyle = seaTexture(c, 1); c.fillRect(0, 0, cv.width, cv.height);
+    const s = Math.max(cv.width / geo.W, cv.height / geo.H), SY = style();
+    c.fillStyle = seaTexture(c, 1, SY.sea, SY.seaTex); c.fillRect(0, 0, cv.width, cv.height);
     c.save(); c.translate((cv.width - geo.W * s) / 2, (cv.height - geo.H * s) / 2 - 8); c.scale(s, s);
     const land = new Path2D(); state.owner.forEach((o, i) => land.addPath(geo.provs[i].path));
-    c.save(); c.clip(land); c.fillStyle = '#e4eaeb'; c.fillRect(0, 0, geo.W, geo.H);
-    const img = relief(); if (img.complete && img.naturalWidth) { c.globalCompositeOperation = 'luminosity'; c.drawImage(img, 0, 0, geo.W, geo.H); c.globalCompositeOperation = 'source-over'; c.fillStyle = 'rgba(255,255,255,0.18)'; c.fillRect(0, 0, geo.W, geo.H); }
+    c.save(); c.clip(land); c.fillStyle = SY.land; c.fillRect(0, 0, geo.W, geo.H);
+    const img = relief(); if (SY.relief > 0 && img.complete && img.naturalWidth) { c.globalAlpha = SY.relief; c.globalCompositeOperation = 'luminosity'; c.drawImage(img, 0, 0, geo.W, geo.H); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; if (SY.wash) { c.fillStyle = `rgba(255,255,255,${SY.wash})`; c.fillRect(0, 0, geo.W, geo.H); } }
     // one path per nation, so shared province edges are not coloured twice
     const byOwner = new Map(); state.owner.forEach((o, i) => { if (o < 0) return; let p = byOwner.get(o); if (!p) byOwner.set(o, p = new Path2D()); p.addPath(geo.provs[i].path); });
-    c.globalAlpha = 0.6; c.globalCompositeOperation = 'multiply';
-    for (const [o, p] of byOwner) { c.fillStyle = state.nations[o].color; c.fill(p); }
+    c.globalAlpha = SY.fill.a; c.globalCompositeOperation = SY.fill.mode;
+    for (const [o, p] of byOwner) { c.fillStyle = tone(state.nations[o].color, SY.fill); c.fill(p); }
     c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.restore();
     c.restore();
     if (!img.complete) img.addEventListener('load', () => renderPreview(cv, data, state), { once: true });
@@ -1111,4 +1170,11 @@ onmessage = (e) => {
   root.WorldMap = WorldMap;
   root.WorldMap.renderPreview = renderPreview;
   root.WorldMap.prepare = prepare;
+  root.WorldMap.STYLES = STYLES;
+  root.WorldMap.style = () => styleId;
+  root.WorldMap.setStyle = id => {
+    if (!STYLES[id]) return;
+    styleId = id;
+    try { localStorage.setItem('frontline-map-style', id); } catch (e) { /* storage blocked: the choice lasts this visit */ }
+  };
 })(typeof window !== 'undefined' ? window : globalThis);
