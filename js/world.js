@@ -11,24 +11,25 @@
   const RAJ = PRINCELY.map(n => ['United Kingdom', n]);
   const PERIODS = {
     '1900': {
-      id: '1900', file: 'data/world-1900.json?v=7', start: [1900, 1], title: 'The Age of Empires', speed: 14, recruitCost: 6,
+      id: '1900', file: 'data/world-1900.json?v=8', start: [1900, 1], title: 'The Age of Empires', speed: 14, recruitCost: 6,
       blurb: 'Queen Victoria still reigns. Europe\'s empires cover the globe, the Boer War rages and China simmers. Fourteen years of peace remain, unless someone breaks it sooner.',
       units: { inf: 0.7, recon: 0.2, art: 0.1 },
       wars: [['United Kingdom', 'Transvaal'], ['United Kingdom', 'Orange Free State']],
       alliances: [...RAJ, ['France', 'Russia'], ['Germany', 'Austria-Hungary'], ['Germany', 'Italy'], ['Austria-Hungary', 'Italy'], ['Transvaal', 'Orange Free State']],
       hostile: [['France', 'Germany', -45], ['Russia', 'Japan', -40], ['United Kingdom', 'Russia', -25], ['Austria-Hungary', 'Serbia', -30], ['Russia', 'Ottoman Empire', -35], ['United Kingdom', 'France', -15],
-        ['Al Saud', 'Jabal Shammar', -70], ['Ottoman Empire', 'Jabal Shammar', 30]]
+        ['Al Saud', 'Jabal Shammar', -70], ['Ottoman Empire', 'Jabal Shammar', 30], ['Kuwait', 'Jabal Shammar', -50], ['Kuwait', 'Al Saud', 40],
+        ['United Kingdom', 'Kuwait', 40], ['Ottoman Empire', 'Kuwait', -20]]
     },
     '1939': {
-      id: '1939', file: 'data/world-1939.json?v=6', start: [1939, 3], title: 'The Gathering Storm', speed: 22, recruitCost: 8,
+      id: '1939', file: 'data/world-1939.json?v=7', start: [1939, 3], title: 'The Gathering Storm', speed: 22, recruitCost: 8,
       blurb: 'Germany has swallowed Austria and eyes Poland. Japan is at war in China. Britain and France promise to defend Poland. The world holds its breath.',
       units: { inf: 0.55, mech: 0.15, armor: 0.12, recon: 0.06, art: 0.1, ad: 0.02 },
       wars: [['Japan', 'China']],
-      alliances: [...RAJ, ['Germany', 'Italy'], ['Germany', 'Japan'], ['Germany', 'Slovakia'], ['United Kingdom', 'France'], ['France', 'Poland'], ['United Kingdom', 'Poland'], ['USSR', 'Mongolia']],
-      hostile: [['Germany', 'Poland', -50], ['Germany', 'France', -40], ['Germany', 'United Kingdom', -25], ['USSR', 'Germany', -35], ['Japan', 'USSR', -45], ['Japan', 'United States', -30], ['Italy', 'France', -25], ['Hungary', 'Romania', -35], ['Germany', 'Czechoslovakia', -60]]
+      alliances: [...RAJ, ['Germany', 'Italy'], ['Germany', 'Japan'], ['Germany', 'Slovakia'], ['United Kingdom', 'France'], ['France', 'Poland'], ['United Kingdom', 'Poland'], ['USSR', 'Mongolia'], ['USSR', 'Tuva']],
+      hostile: [['Germany', 'Poland', -50], ['Germany', 'France', -40], ['Germany', 'United Kingdom', -25], ['USSR', 'Germany', -35], ['Japan', 'USSR', -45], ['Japan', 'United States', -30], ['Italy', 'France', -25], ['Hungary', 'Romania', -35]]
     },
     '2003': {
-      id: '2003', file: 'data/world-2003.json?v=6', start: [2003, 1], title: 'The New Century', speed: 32, recruitCost: 14,
+      id: '2003', file: 'data/world-2003.json?v=7', start: [2003, 1], title: 'The New Century', speed: 32, recruitCost: 14,
       blurb: 'The only superpower prepares to invade Iraq. Russia rebuilds under Putin, China rises fast, and old feuds smoulder from Kashmir to Korea.',
       units: { inf: 0.3, mech: 0.25, armor: 0.2, recon: 0.07, art: 0.08, mlrs: 0.04, ad: 0.02, heli: 0.03, uas: 0.01 },
       wars: [],
@@ -110,7 +111,6 @@
       'Italy': [60, 0.85, 55, 'Fascist dictatorship', 'Duce Benito Mussolini'],
       'China': [80, 0.6, 35, 'Nationalist republic', 'Generalissimo Chiang Kai-shek'],
       'Poland': [40, 0.85, 45, 'Republic (Sanation regime)', 'Marshal Edward Rydz-Śmigły'],
-      'Czechoslovakia': [30, 1.0, 50, 'Republic', 'President Emil Hácha'],
       'Slovakia': [3, 0.8, 20, 'One-party state (German protection)', 'President Jozef Tiso'],
       'Spain': [20, 0.8, 30, 'Nationalist dictatorship', 'Generalísimo Francisco Franco'],
       'Turkey': [25, 0.8, 35, 'Republic', 'President İsmet İnönü'],
@@ -215,6 +215,132 @@
       'Bahrain': [1, 1.0, 40, 'Constitutional monarchy', 'King Hamad bin Isa Al Khalifa']
     }
   };
+  // name -> [government, leader] for nations without a full profile (their strength comes from their size)
+  const PS = 'Princely state (British paramountcy)', PSS = 'Princely states (British paramountcy)';
+  const LEADERS = {
+    '1900': {
+      'Bastar': [PS, 'Raja Rudra Pratap Deo'], 'Bundelkhand States': [PSS, 'Maharaja Pratap Singh of Orchha'],
+      'Chhattisgarh States': [PSS, 'Chiefs of the Chhattisgarh Feudatory States'], 'Cochin': [PS, 'Raja Rama Varma XV'],
+      'Jaisalmer': [PS, 'Maharawal Shalivahan Singh III'], 'Kathiawar States': [PSS, 'Chiefs of the Kathiawar Agency'],
+      'Khairpur': [PS, 'Mir Faiz Muhammad Khan I'], 'Kutch': [PS, 'Maharao Khengarji III'], 'Manipur': [PS, 'Maharaja Churachand Singh'],
+      'Orissa States': [PSS, 'Chiefs of the Orissa Tributary States'], 'Punjab Hill States': [PSS, 'Rajas of the Simla Hill States'],
+      'Rajputana States': [PSS, 'Maharao Umed Singh II of Kota'], 'Rewa': [PS, 'Maharaja Venkat Raman Singh'],
+      'Shan States': ['Shan states (British protection)', 'The Sawbwas of the Shan States'], 'Swat, Dir & Chitral': [PSS, 'Mehtar Shuja ul-Mulk of Chitral'],
+      'Tripura': [PS, 'Maharaja Radha Kishore Manikya'], 'Bhutan': ['Dual theocracy', 'Trongsa Penlop Ugyen Wangchuck'],
+      'Nepal': ['Rana autocracy', 'PM Bir Shumsher Rana (King Prithvi)'], 'Bukhara and Khiva': ['Emirates (Russian protectorates)', 'Emir Abdulahad Khan of Bukhara'],
+      'Oman': ['Sultanate', 'Sultan Faisal bin Turki'], 'Qatar': ['Sheikhdom', 'Sheikh Jassim bin Mohammed Al Thani'],
+      'Kuwait': ['Sheikhdom (British protection)', 'Sheikh Mubarak Al-Sabah'], 'Tonga': ['Constitutional monarchy', 'King George Tupou II'],
+      'Montenegro': ['Principality', 'Prince Nicholas I'], 'Luxembourg': ['Grand duchy', 'Grand Duke Adolphe'],
+      'Liechtenstein': ['Principality', 'Prince Johann II'], 'San Marino': ['Republic', 'The Captains Regent'],
+      'Andorra': ['Co-principality', 'The Co-Princes (French President and Bishop of Urgell)'], 'Liberia': ['Republic', 'President William D. Coleman'],
+      'Bolivia': ['Republic', 'President José Manuel Pando'], 'Colombia': ['Republic (Thousand Days\' War)', 'President Manuel Antonio Sanclemente'],
+      'Costa Rica': ['Republic', 'President Rafael Yglesias Castro'], 'Dominican Republic': ['Republic', 'President Juan Isidro Jimenes'],
+      'Ecuador': ['Republic', 'President Eloy Alfaro'], 'El Salvador': ['Republic', 'President Tomás Regalado'],
+      'Guatemala': ['Republic (dictatorship)', 'President Manuel Estrada Cabrera'], 'Haiti': ['Republic', 'President Tirésias Simon Sam'],
+      'Honduras': ['Republic', 'President Terencio Sierra'], 'Nicaragua': ['Republic (dictatorship)', 'President José Santos Zelaya'],
+      'Paraguay': ['Republic', 'President Emilio Aceval'], 'Peru': ['Republic', 'President Eduardo López de Romaña'],
+      'Uruguay': ['Republic', 'President Juan Lindolfo Cuestas'], 'Venezuela': ['Republic', 'President Cipriano Castro']
+    },
+    '1939': {
+      'Bastar': [PS, 'Maharaja Pravir Chandra Bhanj Deo'], 'Bundelkhand States': [PSS, 'Maharaja Vir Singh II of Orchha'],
+      'Chhattisgarh States': [PSS, 'Chiefs of the Chhattisgarh States'], 'Cochin': [PS, 'Raja Rama Varma XVII'],
+      'Jaisalmer': [PS, 'Maharawal Jawahir Singh'], 'Kathiawar States': [PSS, 'Chiefs of the Western India States Agency'],
+      'Khairpur': [PS, 'Mir Faiz Muhammad Khan II'], 'Kutch': [PS, 'Maharao Khengarji III'], 'Manipur': [PS, 'Maharaja Churachand Singh'],
+      'Orissa States': [PSS, 'Chiefs of the Eastern States Agency'], 'Punjab Hill States': [PSS, 'Rajas of the Punjab Hill States'],
+      'Rajputana States': [PSS, 'Maharao Umed Singh II of Kota'], 'Rewa': [PS, 'Maharaja Gulab Singh'],
+      'Shan States': ['Federated Shan States (British Burma)', 'The Sawbwas of the Shan States'], 'Swat, Dir & Chitral': [PSS, 'Mehtar Muzaffar ul-Mulk of Chitral'],
+      'Tripura': [PS, 'Maharaja Bir Bikram Kishore Manikya'], 'Bhutan': ['Monarchy', 'King Jigme Wangchuck'],
+      'Nepal': ['Rana autocracy', 'PM Juddha Shumsher Rana (King Tribhuvan)'], 'Tibet': ['Theocracy', 'Regent Reting Rinpoche'],
+      'Xinjiang': ['Warlord province (Soviet-backed)', 'Governor Sheng Shicai'], 'Yemen': ['Imamate', 'Imam Yahya Muhammad Hamid ed-Din'],
+      'Oman': ['Sultanate (British influence)', 'Sultan Said bin Taimur'], 'Iceland': ['Kingdom in personal union with Denmark', 'PM Hermann Jónasson (King Christian X)'],
+      'Tuva': ['People\'s republic (Soviet satellite)', 'Chairman Salchak Toka'], 'Tonga': ['Constitutional monarchy (British protection)', 'Queen Sālote Tupou III'],
+      'Liechtenstein': ['Principality', 'Prince Franz Joseph II'], 'San Marino': ['Republic (Fascist-led)', 'The Captains Regent'],
+      'Andorra': ['Co-principality', 'The Co-Princes (French President and Bishop of Urgell)'], 'Luxembourg': ['Grand duchy', 'Grand Duchess Charlotte'],
+      'Liberia': ['Republic', 'President Edwin Barclay'], 'New Zealand': ['Dominion', 'PM Michael Joseph Savage'],
+      'Newfoundland': ['Commission of Government', 'Governor Humphrey Walwyn'], 'Bolivia': ['Republic (military rule)', 'President Germán Busch'],
+      'Chile': ['Republic', 'President Pedro Aguirre Cerda'], 'Colombia': ['Republic', 'President Eduardo Santos'],
+      'Costa Rica': ['Republic', 'President León Cortés Castro'], 'Cuba': ['Republic (Batista-backed)', 'President Federico Laredo Brú'],
+      'Dominican Republic': ['Trujillo dictatorship', 'Rafael Trujillo (President Jacinto Peynado)'], 'Ecuador': ['Republic', 'President Aurelio Mosquera'],
+      'El Salvador': ['Military dictatorship', 'President Maximiliano Hernández Martínez'], 'Guatemala': ['Dictatorship', 'President Jorge Ubico'],
+      'Haiti': ['Republic', 'President Sténio Vincent'], 'Honduras': ['Dictatorship', 'President Tiburcio Carías Andino'],
+      'Nicaragua': ['Somoza dictatorship', 'President Anastasio Somoza García'], 'Panama': ['Republic', 'President Juan Demóstenes Arosemena'],
+      'Paraguay': ['Republic', 'President Félix Paiva'], 'Peru': ['Republic (authoritarian)', 'President Óscar R. Benavides'],
+      'Uruguay': ['Republic', 'President Alfredo Baldomir'], 'Venezuela': ['Republic', 'President Eleazar López Contreras']
+    },
+    '2003': {
+      'Albania': ['Parliamentary republic', 'PM Fatos Nano'], 'Algeria': ['Republic', 'President Abdelaziz Bouteflika'],
+      'Andorra': ['Co-principality', 'Head of Government Marc Forné Molné'], 'Angola': ['Republic', 'President José Eduardo dos Santos'],
+      'Antigua and Barbuda': ['Commonwealth realm', 'PM Lester Bird'], 'Armenia': ['Republic', 'President Robert Kocharyan'],
+      'Austria': ['Federal republic', 'Chancellor Wolfgang Schüssel'], 'Azerbaijan': ['Republic', 'President Heydar Aliyev'],
+      'Bahamas': ['Commonwealth realm', 'PM Perry Christie'], 'Bangladesh': ['Parliamentary republic', 'PM Khaleda Zia'],
+      'Barbados': ['Commonwealth realm', 'PM Owen Arthur'], 'Belgium': ['Constitutional monarchy', 'PM Guy Verhofstadt'],
+      'Belize': ['Commonwealth realm', 'PM Said Musa'], 'Benin': ['Republic', 'President Mathieu Kérékou'],
+      'Bhutan': ['Monarchy', 'King Jigme Singye Wangchuck'], 'Bolivia': ['Republic', 'President Gonzalo Sánchez de Lozada'],
+      'Bosnia and Herzegovina': ['Federal republic (international oversight)', 'High Representative Paddy Ashdown'],
+      'Botswana': ['Republic', 'President Festus Mogae'], 'Brunei': ['Sultanate', 'Sultan Hassanal Bolkiah'],
+      'Bulgaria': ['Parliamentary republic', 'PM Simeon Saxe-Coburg-Gotha'], 'Burkina Faso': ['Republic', 'President Blaise Compaoré'],
+      'Burundi': ['Transitional government', 'President Pierre Buyoya'], 'Cambodia': ['Constitutional monarchy', 'PM Hun Sen'],
+      'Cameroon': ['Republic', 'President Paul Biya'], 'Central African Republic': ['Republic', 'President Ange-Félix Patassé'],
+      'Chad': ['Republic', 'President Idriss Déby'], 'Chile': ['Republic', 'President Ricardo Lagos'],
+      'Colombia': ['Republic', 'President Álvaro Uribe'], 'Congo': ['Republic', 'President Denis Sassou Nguesso'],
+      'Costa Rica': ['Republic', 'President Abel Pacheco'], 'Croatia': ['Parliamentary republic', 'PM Ivica Račan'],
+      'Cyprus': ['Republic', 'President Glafcos Clerides'], 'Czech Republic': ['Parliamentary republic', 'PM Vladimír Špidla'],
+      'DR Congo': ['Republic (civil war)', 'President Joseph Kabila'], 'Denmark': ['Constitutional monarchy', 'PM Anders Fogh Rasmussen'],
+      'Djibouti': ['Republic', 'President Ismaïl Omar Guelleh'], 'Dominica': ['Parliamentary republic', 'PM Pierre Charles'],
+      'Dominican Republic': ['Republic', 'President Hipólito Mejía'], 'Ecuador': ['Republic', 'President Gustavo Noboa'],
+      'El Salvador': ['Republic', 'President Francisco Flores'], 'Equatorial Guinea': ['Republic (authoritarian)', 'President Teodoro Obiang'],
+      'Estonia': ['Parliamentary republic', 'PM Siim Kallas'], 'Fiji': ['Republic', 'PM Laisenia Qarase'],
+      'Finland': ['Republic', 'PM Paavo Lipponen'], 'Gabon': ['Republic', 'President Omar Bongo'],
+      'Gambia': ['Republic', 'President Yahya Jammeh'], 'Ghana': ['Republic', 'President John Kufuor'],
+      'Grenada': ['Commonwealth realm', 'PM Keith Mitchell'], 'Guatemala': ['Republic', 'President Alfonso Portillo'],
+      'Guinea': ['Republic', 'President Lansana Conté'], 'Guinea-Bissau': ['Republic', 'President Kumba Ialá'],
+      'Guyana': ['Republic', 'President Bharrat Jagdeo'], 'Haiti': ['Republic', 'President Jean-Bertrand Aristide'],
+      'Honduras': ['Republic', 'President Ricardo Maduro'], 'Hungary': ['Parliamentary republic', 'PM Péter Medgyessy'],
+      'Iceland': ['Parliamentary republic', 'PM Davíð Oddsson'], 'Ireland': ['Parliamentary republic', 'Taoiseach Bertie Ahern'],
+      'Ivory Coast': ['Republic (civil war)', 'President Laurent Gbagbo'], 'Jamaica': ['Commonwealth realm', 'PM P. J. Patterson'],
+      'Kenya': ['Republic', 'President Mwai Kibaki'], 'Kyrgyzstan': ['Republic', 'President Askar Akayev'],
+      'Laos': ['Communist state', 'President Khamtai Siphandon'], 'Latvia': ['Parliamentary republic', 'PM Einars Repše'],
+      'Lebanon': ['Parliamentary republic (Syrian presence)', 'President Émile Lahoud (PM Rafic Hariri)'], 'Lesotho': ['Constitutional monarchy', 'PM Pakalitha Mosisili'],
+      'Liberia': ['Republic (civil war)', 'President Charles Taylor'], 'Liechtenstein': ['Principality', 'Prince Hans-Adam II'],
+      'Lithuania': ['Republic', 'President Valdas Adamkus'], 'Luxembourg': ['Grand duchy', 'PM Jean-Claude Juncker'],
+      'Macedonia': ['Parliamentary republic', 'PM Branko Crvenkovski'], 'Madagascar': ['Republic', 'President Marc Ravalomanana'],
+      'Malawi': ['Republic', 'President Bakili Muluzi'], 'Malaysia': ['Federal constitutional monarchy', 'PM Mahathir Mohamad'],
+      'Mali': ['Republic', 'President Amadou Toumani Touré'], 'Malta': ['Parliamentary republic', 'PM Eddie Fenech Adami'],
+      'Mauritania': ['Republic (authoritarian)', 'President Maaouya Ould Sid\'Ahmed Taya'], 'Moldova': ['Parliamentary republic', 'President Vladimir Voronin'],
+      'Mongolia': ['Parliamentary republic', 'PM Nambaryn Enkhbayar'], 'Morocco': ['Constitutional monarchy', 'King Mohammed VI'],
+      'Mozambique': ['Republic', 'President Joaquim Chissano'], 'Myanmar': ['Military junta', 'Senior General Than Shwe'],
+      'Namibia': ['Republic', 'President Sam Nujoma'], 'Nepal': ['Constitutional monarchy (civil war)', 'King Gyanendra'],
+      'Netherlands': ['Constitutional monarchy', 'PM Jan Peter Balkenende'], 'New Zealand': ['Commonwealth realm', 'PM Helen Clark'],
+      'Nicaragua': ['Republic', 'President Enrique Bolaños'], 'Niger': ['Republic', 'President Mamadou Tandja'],
+      'Norway': ['Constitutional monarchy', 'PM Kjell Magne Bondevik'], 'Oman': ['Sultanate', 'Sultan Qaboos bin Said'],
+      'Panama': ['Republic', 'President Mireya Moscoso'], 'Papua New Guinea': ['Commonwealth realm', 'PM Michael Somare'],
+      'Paraguay': ['Republic', 'President Luis González Macchi'], 'Peru': ['Republic', 'President Alejandro Toledo'],
+      'Philippines': ['Republic', 'President Gloria Macapagal Arroyo'], 'Portugal': ['Parliamentary republic', 'PM José Manuel Durão Barroso'],
+      'Qatar': ['Emirate', 'Emir Hamad bin Khalifa Al Thani'], 'Romania': ['Republic', 'President Ion Iliescu (PM Adrian Năstase)'],
+      'Rwanda': ['Republic', 'President Paul Kagame'], 'Saint Kitts and Nevis': ['Commonwealth realm', 'PM Denzil Douglas'],
+      'Saint Lucia': ['Commonwealth realm', 'PM Kenny Anthony'], 'Saint Vincent and the Grenadines': ['Commonwealth realm', 'PM Ralph Gonsalves'],
+      'Samoa': ['Parliamentary republic', 'PM Tuilaepa Sailele Malielegaoi'], 'Senegal': ['Republic', 'President Abdoulaye Wade'],
+      'Sierra Leone': ['Republic', 'President Ahmad Tejan Kabbah'], 'Slovakia': ['Parliamentary republic', 'PM Mikuláš Dzurinda'],
+      'Slovenia': ['Parliamentary republic', 'PM Anton Rop'], 'Somalia': ['Transitional government (civil war)', 'President Abdiqasim Salad Hassan'],
+      'Sri Lanka': ['Republic', 'President Chandrika Kumaratunga'], 'Sudan': ['Military-Islamist government (civil war)', 'President Omar al-Bashir'],
+      'Suriname': ['Republic', 'President Ronald Venetiaan'], 'Swaziland': ['Absolute monarchy', 'King Mswati III'],
+      'Sweden': ['Constitutional monarchy', 'PM Göran Persson'], 'Tajikistan': ['Republic', 'President Emomali Rahmonov'],
+      'Tanzania': ['Republic', 'President Benjamin Mkapa'], 'Thailand': ['Constitutional monarchy', 'PM Thaksin Shinawatra'],
+      'Togo': ['Republic (authoritarian)', 'President Gnassingbé Eyadéma'], 'Tonga': ['Constitutional monarchy', 'King Tāufaʻāhau Tupou IV'],
+      'Trinidad': ['Parliamentary republic', 'PM Patrick Manning'], 'Tunisia': ['Republic (authoritarian)', 'President Zine El Abidine Ben Ali'],
+      'Turkmenistan': ['One-party state', 'President Saparmurat Niyazov'], 'Uganda': ['Republic', 'President Yoweri Museveni'],
+      'United Arab Emirates': ['Federation of emirates', 'President Sheikh Zayed bin Sultan Al Nahyan'], 'Uruguay': ['Republic', 'President Jorge Batlle'],
+      'Uzbekistan': ['Republic (authoritarian)', 'President Islam Karimov'], 'Yemen': ['Republic', 'President Ali Abdullah Saleh'],
+      'Zambia': ['Republic', 'President Levy Mwanawasa'], 'San Marino': ['Republic', 'The Captains Regent'],
+      'Seychelles': ['Republic', 'President France-Albert René'], 'Kiribati': ['Republic', 'President Teburoro Tito'],
+      'Marshall Islands': ['Republic (free association with the US)', 'President Kessai Note'], 'Mauritius': ['Parliamentary republic', 'PM Anerood Jugnauth'],
+      'Comoros': ['Federal republic', 'President Azali Assoumani'], 'São Tomé and Príncipe': ['Republic', 'President Fradique de Menezes'],
+      'Cape Verde': ['Republic', 'PM José Maria Neves'], 'Solomon Islands': ['Commonwealth realm', 'PM Allan Kemakeza'],
+      'Maldives': ['Republic', 'President Maumoon Abdul Gayoom'], 'Nauru': ['Republic', 'President René Harris'],
+      'Micronesia': ['Republic (free association with the US)', 'President Leo Falcam'], 'Vanuatu': ['Parliamentary republic', 'PM Edward Natapei'],
+      'Palau': ['Republic (free association with the US)', 'President Tommy Remengesau']
+    }
+  };
 
   const COLORS = {
     'United Kingdom': '#c48a8d', 'France': '#879cc4', 'Germany': '#9e9e9e', 'Russia': '#88b492', 'USSR': '#bf807d', 'United States': '#7f92bd',
@@ -266,7 +392,7 @@
   const SEA_KM = 160, ENGAGE_KM = 32, STEP = 0.25;
   function newGame(data, periodId, playerName) {
     DATA = data;
-    const P = PERIODS[periodId], prof = PROFILES[periodId] || {};
+    const P = PERIODS[periodId], prof = PROFILES[periodId] || {}, lead = LEADERS[periodId] || {};
     const g = {
       v: 3, period: periodId, start: P.start.slice(), year: P.start[0], month: P.start[1], day: 0, turn: 1, seed: 12345,
       player: -1, nations: [], owner: [], ctrl: [], armies: [], nextArmy: 1, battles: [], nextBattle: 1,
@@ -280,7 +406,7 @@
       g.nations.push({
         name: n.name, color: COLORS[n.name] || hashColor(n.name), cap: n.cap, great: !!n.great || !!(p && p[0] >= 25),
         tech: p ? p[1] : baseTech, eco: p ? p[2] : Math.round(15 + Math.min(40, Math.sqrt(area))), stab: 60, mil: 50,
-        gov: p ? p[3] : '', leader: p ? p[4] : '', money: 0, alive: true,
+        gov: p ? p[3] : (lead[n.name] || [])[0] || '', leader: p ? p[4] : (lead[n.name] || [])[1] || '', money: 0, alive: true,
         rel: {}, allies: [], wars: [], startDiv: div
       });
     });
@@ -853,7 +979,7 @@
       'USSR': ['Georgy Zhukov', 'Semyon Timoshenko', 'Konstantin Rokossovsky', 'Ivan Konev'], 'Poland': ['Edward Rydz-Śmigły', 'Tadeusz Kutrzeba', 'Władysław Bortnowski'],
       'Italy': ['Rodolfo Graziani', 'Italo Balbo', 'Ugo Cavallero'], 'Japan': ['Tomoyuki Yamashita', 'Masaharu Homma', 'Hisaichi Terauchi'],
       'United States': ['George Marshall', 'Douglas MacArthur', 'George Patton', 'Dwight Eisenhower'], 'China': ['Xue Yue', 'Li Zongren', 'Bai Chongxi'],
-      'Finland': ['Carl Gustaf Mannerheim'], 'Czechoslovakia': ['Ludvík Krejčí'] },
+      'Finland': ['Carl Gustaf Mannerheim'] },
     '2003': { 'United States': ['Tommy Franks', 'William Wallace', 'David Petraeus', 'James Mattis'], 'United Kingdom': ['Brian Burridge', 'Robin Brims'],
       'Russia': ['Valery Gerasimov', 'Yuri Baluyevsky', 'Vladimir Shamanov'], 'China': ['Liang Guanglie', 'Guo Boxiong'], 'Iraq': ['Ali Hassan al-Majid', 'Qusay Hussein', 'Raad al-Hamdani'],
       'Iran': ['Qasem Soleimani', 'Yahya Rahim Safavi'], 'Israel': ['Moshe Ya\'alon', 'Dan Halutz'], 'Syria': ['Hassan Turkmani', 'Ali Habib Mahmoud'],
