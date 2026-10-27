@@ -211,10 +211,10 @@
     }
     const pad = 1 / sc;
     const ids = geo.provsIn(x0 - pad, y0 - pad, x1 + pad, y1 + pad);
-    // plain white sea so the land reads on its own
+    // soft blue sea so the land reads on its own
     const sea = new Path2D(); sea.rect(x0 - pad, y0 - pad, tw + 2 * pad, tw + 2 * pad);
     for (const i of ids) sea.addPath(geo.provs[i].path);
-    ctx.fillStyle = '#ffffff'; ctx.fill(sea, 'evenodd');
+    ctx.fillStyle = '#d3e2e9'; ctx.fill(sea, 'evenodd');
     // nation colours over the terrain; occupied land striped in the occupier's colour
     const byOwner = new Map(), occ = new Map();
     for (const i of ids) {
@@ -243,12 +243,12 @@
     const z = sc / job.dpr, px = w => w * 1.3 / z;
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     if (z > 0.9 && prov.length) { ctx.strokeStyle = `rgba(40,50,55,${Math.min(0.28, (z - 0.9) * 0.25)})`; ctx.lineWidth = px(0.7); ctx.stroke(arcPath(geo, prov)); }
-    if (coast.length) { ctx.strokeStyle = 'rgba(95,120,132,0.85)'; ctx.lineWidth = px(0.9); ctx.stroke(arcPath(geo, coast)); }
-    if (nation.length) { ctx.strokeStyle = 'rgba(62,72,78,0.85)'; ctx.lineWidth = px(Math.max(1, Math.min(2.2, z * 0.6))); ctx.stroke(arcPath(geo, nation)); }
+    if (coast.length) { ctx.strokeStyle = 'rgba(120,148,162,0.7)'; ctx.lineWidth = px(0.8); ctx.stroke(arcPath(geo, coast)); }
+    if (nation.length) { ctx.strokeStyle = 'rgba(80,90,96,0.6)'; ctx.lineWidth = px(Math.max(1, Math.min(2.2, z * 0.6))); ctx.stroke(arcPath(geo, nation)); }
     if (front.length && job.front) {
       const p = arcPath(geo, front);
       ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = px(4.5); ctx.stroke(p);
-      ctx.strokeStyle = '#b8322c'; ctx.lineWidth = px(2.4); ctx.stroke(p);
+      ctx.strokeStyle = '#c0574f'; ctx.lineWidth = px(2.2); ctx.stroke(p);
     }
   }
   function workerSource() {
@@ -877,7 +877,7 @@ onmessage = (e) => {
       const { ctx, cam, geo } = this, z = cam.z;
       this.drawnVer = this.version; this.drawnCam = { x: cam.x, y: cam.y, z: cam.z };
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
+      ctx.fillStyle = '#d3e2e9'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
       this.drawTiles(ctx, now);
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.drawLabels(ctx, now);
@@ -1058,7 +1058,7 @@ onmessage = (e) => {
   function renderPreview(cv, data, state) {
     const geo = prepare(data), c = cv.getContext('2d');
     const s = Math.max(cv.width / geo.W, cv.height / geo.H);
-    c.fillStyle = '#ffffff'; c.fillRect(0, 0, cv.width, cv.height);
+    c.fillStyle = '#d3e2e9'; c.fillRect(0, 0, cv.width, cv.height);
     c.save(); c.translate((cv.width - geo.W * s) / 2, (cv.height - geo.H * s) / 2 - 8); c.scale(s, s);
     const land = new Path2D(); state.owner.forEach((o, i) => land.addPath(geo.provs[i].path));
     c.save(); c.clip(land); c.fillStyle = '#e4eaeb'; c.fillRect(0, 0, geo.W, geo.H);
