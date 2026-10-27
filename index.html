@@ -14,6 +14,14 @@
 </head>
 <body>
 
+<!-- ============ INTRO ============ -->
+<section id="intro" class="screen" hidden aria-label="Opening sequence">
+  <canvas id="intro-cv"></canvas>
+  <div class="vhs vhs-tl">▶ PLAY</div><div class="vhs vhs-tr" id="intro-tc">0:00:00</div>
+  <div class="vhs vhs-bl">SP</div><div class="vhs vhs-br" id="intro-date"></div>
+  <button type="button" id="intro-skip">Skip intro</button>
+</section>
+
 <!-- ============ START ============ -->
 <section id="start" class="screen">
   <canvas id="start-bg"></canvas>
@@ -139,6 +147,7 @@
 <script src="battle/engine.js?v=19"></script>
 <script src="battle/ai.js?v=19"></script>
 <script src="battle/battle.js?v=19"></script>
+<script src="js/intro.js?v=19"></script>
 <script src="js/app.js?v=19"></script>
 </body>
 </html>

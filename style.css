@@ -372,3 +372,18 @@ textarea.orders:focus { outline: none; border-color: var(--blue); }
 #engage .oddsbar { height: 4px; border-radius: 0; background: var(--red); margin: 4px 0 0; }
 #engage .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .kicker { font-family: var(--mono); letter-spacing: .28em; text-transform: uppercase; color: var(--dim); font-size: 11px; }
+
+/* opening sequence: VHS frame over a live canvas */
+#intro { z-index: 40; background: #000; cursor: pointer; transition: opacity .6s; }
+#intro.leaving { opacity: 0; }
+#intro canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+#intro::before { content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none; background: repeating-linear-gradient(transparent 0 2px, rgba(0,0,0,.28) 2px 3px); }
+#intro::after { content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none; border-radius: 28px / 22px; box-shadow: inset 0 0 0 10px #000, inset 0 0 90px 30px rgba(0,0,0,.85); }
+.vhs { position: absolute; z-index: 3; font-family: var(--mono); font-size: 13px; letter-spacing: .12em; color: #fff; text-shadow: 0 0 6px rgba(255,255,255,.7), 2px 0 rgba(255,60,120,.5), -2px 0 rgba(60,200,255,.5); pointer-events: none; }
+.vhs-tl { left: max(28px, env(safe-area-inset-left)); top: max(24px, env(safe-area-inset-top)); }
+.vhs-tr { right: max(28px, env(safe-area-inset-right)); top: max(24px, env(safe-area-inset-top)); }
+.vhs-bl { left: max(28px, env(safe-area-inset-left)); bottom: max(24px, env(safe-area-inset-bottom)); }
+.vhs-br { right: max(28px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); }
+#intro-skip { position: absolute; z-index: 4; right: max(28px, env(safe-area-inset-right)); bottom: max(52px, calc(env(safe-area-inset-bottom) + 28px)); background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.35); color: #fff; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; padding: 7px 12px; }
+#intro-skip:hover, #intro-skip:focus-visible { border-color: #fff; outline: none; }
+#intro[data-style="war"] .vhs { text-shadow: 0 0 6px rgba(255,80,80,.7); }
