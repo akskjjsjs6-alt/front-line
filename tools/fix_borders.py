@@ -52,6 +52,9 @@ GERMAN_NEW_GUINEA = {'Sandaun', 'East Sepik', 'Madang', 'Morobe', 'Enga', 'Weste
                      'West New Britain', 'East New Britain', 'New Ireland', 'Manus', 'of Bougainville'}
 # Siamese until the treaties of 1904-1909
 SIAM_1900 = {'Battambang', 'Siem Reap', 'Banteay Meanchey', 'Sainyabuli', 'Kelantan', 'Terengganu'}
+# The source's 'Arabia' was two rival emirates: the Rashidis of Jabal Shammar (Ha'il) held the north and centre,
+# the House of Saud (exiled to Kuwait until it retook Riyadh in 1902) is given southern Najd to start from
+SAUD_1900 = {'Riyadh', 'South Riyadh', 'Eastern V', 'Najran', "Northeast 'Asir"}
 ISLANDS_1939 = {
     'Bermuda': UK, 'Falkland Islands': UK, 'Mauritius': UK, 'Seychelles': UK, 'Maldives': UK, 'Saint Helena': UK, 'Fiji': UK,
     'Solomon Islands': UK, 'Pitcairn Islands': UK, 'South Georgia': UK, 'British Indian Ocean': UK, 'Indian Ocean Territories': UK,
@@ -77,6 +80,8 @@ def rules_1900(c, owner, name):
         return US                                            # the western Aleutians
     if name in SIAM_1900:
         return 'Siam'
+    if owner == 'Arabia':
+        return 'Al Saud' if name in SAUD_1900 else 'Jabal Shammar'
     if c in ('Uzbekistan', 'Turkmenistan', 'Tajikistan'):
         return KHANATES if name in KHANATE_PROVINCES else 'Russia'
     if c == 'Papua New Guinea':
@@ -158,7 +163,7 @@ def rules_1939(c, owner, name):
     return None
 
 
-CAPITALS = {'1939': {'China': 'Chongqing', 'Slovakia': 'Bratislava'}, '2003': {'Yugoslavia': 'Belgrade'}}   # China's wartime capital: Nanjing had fallen in 1937
+CAPITALS = {'1900': {'Jabal Shammar': "Ha'il", 'Al Saud': 'Riyadh'}, '1939': {'China': 'Chongqing', 'Slovakia': 'Bratislava'}, '2003': {'Yugoslavia': 'Belgrade'}}   # China's wartime capital: Nanjing had fallen in 1937
 
 # 2003: land belongs to the country it lies in today, with these exceptions and renamings
 SOVEREIGN_2003 = {
