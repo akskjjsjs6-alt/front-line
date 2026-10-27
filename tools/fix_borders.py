@@ -56,6 +56,11 @@ OCCUPIED_1939 = {'Beijing', 'Tianjin', 'Hebei', 'Shandong', 'Shanxi', 'Jiangsu',
                  'East Inner Mongolia'}
 
 
+def aden(name):
+    """Province in the British Aden colony and protectorate (south Yemen)."""
+    return any(k in name for k in ("'Adan", 'Abyan', 'Shabwah', 'Hadhramaut', 'Mahrah'))
+
+
 def rules_1900(c, owner, name):
     """New owner for a province in 1900 (or None to leave it)."""
     if c in COLONY_1900 and (owner in GONE_1900 or owner != COLONY_1900[c]):
@@ -77,11 +82,11 @@ def rules_1900(c, owner, name):
         return 'Oman'
     if c == 'Somalia':
         return UK if name in ('Lower Juba', 'Middle Juba') else IT
-    if c == 'Yemen' and (owner == 'Arabia' or name == "'Adan"):
-        return UK                                            # Aden and its protectorate
+    if c == 'Yemen':
+        return UK if aden(name) else 'Ottoman Empire'       # Aden and its protectorate; the north is Ottoman
     if c == 'Bulgaria' and name in ('South Burgas', 'South Yambol', 'South Sofia', 'Kyustendil'):
         return 'Bulgaria'                                    # Eastern Rumelia joined Bulgaria in 1885
-    if c in ('Myanmar', 'Guyana') and owner != UK:
+    if (c == 'Myanmar' and owner == 'Siam') or (c == 'Guyana' and owner != UK):
         return UK
     if c in ('Germany', 'Portugal', 'France', 'Colombia', 'Ecuador') and owner != {'Germany': DE}.get(c, c):
         return {'Germany': DE}.get(c, c)
@@ -111,10 +116,7 @@ def rules_1939(c, owner, name):
     if c in ('Rwanda', 'Burundi'):
         return BE                                            # Ruanda-Urundi mandate
     if c == 'Yemen':
-        if name in ("'Adan", 'Abyan', 'Shabwah', 'Southwest Hadhramaut', 'Southwest Al Mahrah'):
-            return UK
-        if owner == 'Saudi Arabia':
-            return 'Yemen'
+        return UK if aden(name) else 'Yemen'
     if c == 'Russia' and owner == US:
         return 'USSR'
     if c in ('Portugal', 'France', 'Norway', 'Colombia', 'Ecuador', 'Australia', 'New Zealand') and owner != c:

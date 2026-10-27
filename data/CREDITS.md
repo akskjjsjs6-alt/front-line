@@ -13,3 +13,6 @@
 - **City names and populations** come from Natural Earth's populated places (public domain).
 
 All of it is rebuilt by `tools/build_map.py`. Borders are approximate and simplified for gameplay.
+- **Princely states of India** (1900 and 1939 maps) are approximated from groups of modern district outlines from
+  [geoBoundaries](https://www.geoboundaries.org/) (gbOpen, CC BY 4.0; Runfola et al. 2020), plus Natural Earth regions for
+  Burma's Shan States. See `tools/princely.py`.

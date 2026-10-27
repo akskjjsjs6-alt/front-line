@@ -3,21 +3,27 @@
   'use strict';
 
   // ------------------------------------------------------------------ periods
+  // India's princely states: under British paramountcy, so allied to Britain from the start
+  const PRINCELY = ['Hyderabad', 'Mysore', 'Travancore', 'Cochin', 'Jammu and Kashmir', 'Jodhpur', 'Bikaner', 'Jaisalmer', 'Jaipur',
+    'Udaipur', 'Rajputana States', 'Gwalior', 'Indore', 'Bhopal', 'Rewa', 'Bundelkhand States', 'Baroda', 'Kathiawar States', 'Kutch',
+    'Patiala', 'Punjab Hill States', 'Bahawalpur', 'Khairpur', 'Kalat', 'Bastar', 'Chhattisgarh States', 'Orissa States',
+    'Swat, Dir & Chitral', 'Shan States', 'Sikkim', 'Manipur', 'Tripura'];
+  const RAJ = PRINCELY.map(n => ['United Kingdom', n]);
   const PERIODS = {
     '1900': {
-      id: '1900', file: 'data/world-1900.json?v=2', start: [1900, 1], title: 'The Age of Empires', speed: 14, recruitCost: 6,
+      id: '1900', file: 'data/world-1900.json?v=3', start: [1900, 1], title: 'The Age of Empires', speed: 14, recruitCost: 6,
       blurb: 'Queen Victoria still reigns. Europe\'s empires cover the globe, the Boer War rages and China simmers. Fourteen years of peace remain, unless someone breaks it sooner.',
       units: { inf: 0.7, recon: 0.2, art: 0.1 },
       wars: [['United Kingdom', 'Transvaal'], ['United Kingdom', 'Orange Free State']],
-      alliances: [['France', 'Russia'], ['Germany', 'Austria-Hungary'], ['Germany', 'Italy'], ['Austria-Hungary', 'Italy'], ['Transvaal', 'Orange Free State']],
+      alliances: [...RAJ, ['France', 'Russia'], ['Germany', 'Austria-Hungary'], ['Germany', 'Italy'], ['Austria-Hungary', 'Italy'], ['Transvaal', 'Orange Free State']],
       hostile: [['France', 'Germany', -45], ['Russia', 'Japan', -40], ['United Kingdom', 'Russia', -25], ['Austria-Hungary', 'Serbia', -30], ['Russia', 'Ottoman Empire', -35], ['United Kingdom', 'France', -15]]
     },
     '1939': {
-      id: '1939', file: 'data/world-1939.json?v=2', start: [1939, 3], title: 'The Gathering Storm', speed: 22, recruitCost: 8,
+      id: '1939', file: 'data/world-1939.json?v=3', start: [1939, 3], title: 'The Gathering Storm', speed: 22, recruitCost: 8,
       blurb: 'Germany has swallowed Austria and eyes Poland. Japan is at war in China. Britain and France promise to defend Poland. The world holds its breath.',
       units: { inf: 0.55, mech: 0.15, armor: 0.12, recon: 0.06, art: 0.1, ad: 0.02 },
       wars: [['Japan', 'China']],
-      alliances: [['Germany', 'Italy'], ['Germany', 'Japan'], ['Germany', 'Slovakia'], ['United Kingdom', 'France'], ['France', 'Poland'], ['United Kingdom', 'Poland'], ['USSR', 'Mongolia']],
+      alliances: [...RAJ, ['Germany', 'Italy'], ['Germany', 'Japan'], ['Germany', 'Slovakia'], ['United Kingdom', 'France'], ['France', 'Poland'], ['United Kingdom', 'Poland'], ['USSR', 'Mongolia']],
       hostile: [['Germany', 'Poland', -50], ['Germany', 'France', -40], ['Germany', 'United Kingdom', -25], ['USSR', 'Germany', -35], ['Japan', 'USSR', -45], ['Japan', 'United States', -30], ['Italy', 'France', -25], ['Hungary', 'Romania', -35], ['Germany', 'Czechoslovakia', -60]]
     },
     '2003': {
@@ -73,7 +79,23 @@
       'Serbia': [5, 0.8, 25, 'Monarchy', 'King Alexander I'],
       'Bulgaria': [6, 0.8, 25, 'Principality', 'Prince Ferdinand'],
       'Chile': [6, 0.8, 40, 'Republic', 'President Federico Errázuriz'],
-      'Switzerland': [4, 0.95, 65, 'Federal republic', 'Federal Council']
+      'Switzerland': [4, 0.95, 65, 'Federal republic', 'Federal Council'],
+      'Hyderabad': [4, 0.7, 30, 'Princely state (British paramountcy)', 'Nizam Mir Mahbub Ali Khan'],
+      'Mysore': [2, 0.75, 25, 'Princely state (British paramountcy)', 'Maharaja Krishnaraja Wadiyar IV'],
+      'Jammu and Kashmir': [2, 0.65, 15, 'Princely state (British paramountcy)', 'Maharaja Pratap Singh'],
+      'Travancore': [1, 0.75, 15, 'Princely state (British paramountcy)', 'Maharaja Moolam Thirunal'],
+      'Baroda': [1, 0.75, 15, 'Princely state (British paramountcy)', 'Maharaja Sayajirao Gaekwad III'],
+      'Gwalior': [2, 0.7, 15, 'Princely state (British paramountcy)', 'Maharaja Madho Rao Scindia'],
+      'Indore': [1, 0.7, 12, 'Princely state (British paramountcy)', 'Maharaja Shivaji Rao Holkar'],
+      'Bhopal': [1, 0.7, 10, 'Princely state (British paramountcy)', 'Begum Shah Jahan'],
+      'Patiala': [1, 0.7, 12, 'Princely state (British paramountcy)', 'Maharaja Bhupinder Singh'],
+      'Jodhpur': [1, 0.7, 10, 'Princely state (British paramountcy)', 'Maharaja Sardar Singh'],
+      'Bikaner': [1, 0.7, 8, 'Princely state (British paramountcy)', 'Maharaja Ganga Singh'],
+      'Jaipur': [1, 0.7, 10, 'Princely state (British paramountcy)', 'Maharaja Madho Singh II'],
+      'Udaipur': [1, 0.7, 8, 'Princely state (British paramountcy)', 'Maharana Fateh Singh'],
+      'Kalat': [1, 0.6, 5, 'Khanate (British paramountcy)', 'Khan Mir Mahmud Khan II'],
+      'Bahawalpur': [1, 0.65, 8, 'Princely state (British paramountcy)', 'Nawab Muhammad Bahawal Khan V'],
+      'Sikkim': [0.5, 0.6, 3, 'Protectorate', 'Chogyal Thutob Namgyal']
     },
     '1939': {
       'Germany': [100, 1.3, 90, 'Nazi dictatorship', 'Führer Adolf Hitler'],
@@ -119,7 +141,23 @@
       'Latvia': [3, 0.8, 35, 'Authoritarian republic', 'President Kārlis Ulmanis'],
       'Estonia': [2, 0.8, 35, 'Authoritarian republic', 'President Konstantin Päts'],
       'Iraq': [4, 0.6, 25, 'Monarchy', 'King Ghazi'],
-      'Afghanistan': [4, 0.55, 15, 'Monarchy', 'King Zahir Shah']
+      'Afghanistan': [4, 0.55, 15, 'Monarchy', 'King Zahir Shah'],
+      'Hyderabad': [5, 0.75, 35, 'Princely state (British paramountcy)', 'Nizam Mir Osman Ali Khan'],
+      'Mysore': [2, 0.8, 30, 'Princely state (British paramountcy)', 'Maharaja Krishnaraja Wadiyar IV'],
+      'Jammu and Kashmir': [2, 0.7, 15, 'Princely state (British paramountcy)', 'Maharaja Hari Singh'],
+      'Travancore': [1, 0.8, 18, 'Princely state (British paramountcy)', 'Maharaja Chithira Thirunal'],
+      'Baroda': [1, 0.8, 18, 'Princely state (British paramountcy)', 'Maharaja Sayajirao Gaekwad III'],
+      'Gwalior': [2, 0.75, 15, 'Princely state (British paramountcy)', 'Maharaja Jivajirao Scindia'],
+      'Indore': [1, 0.75, 12, 'Princely state (British paramountcy)', 'Maharaja Yeshwant Rao Holkar II'],
+      'Bhopal': [1, 0.75, 10, 'Princely state (British paramountcy)', 'Nawab Hamidullah Khan'],
+      'Patiala': [1, 0.75, 12, 'Princely state (British paramountcy)', 'Maharaja Yadavindra Singh'],
+      'Jodhpur': [1, 0.75, 10, 'Princely state (British paramountcy)', 'Maharaja Umaid Singh'],
+      'Bikaner': [1, 0.75, 8, 'Princely state (British paramountcy)', 'Maharaja Ganga Singh'],
+      'Jaipur': [1, 0.75, 10, 'Princely state (British paramountcy)', 'Maharaja Man Singh II'],
+      'Udaipur': [1, 0.75, 8, 'Princely state (British paramountcy)', 'Maharana Bhupal Singh'],
+      'Kalat': [1, 0.6, 5, 'Khanate (British paramountcy)', 'Khan Ahmad Yar Khan'],
+      'Bahawalpur': [1, 0.7, 8, 'Princely state (British paramountcy)', 'Nawab Sadeq Muhammad Khan V'],
+      'Sikkim': [0.5, 0.6, 3, 'Protectorate', 'Chogyal Tashi Namgyal']
     },
     '2003': {
       'United States': [60, 1.6, 160, 'Federal republic', 'President George W. Bush'],

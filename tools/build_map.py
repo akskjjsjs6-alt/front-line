@@ -168,6 +168,10 @@ def split_large(r, limit=320000):
 
 
 # ------------------------------------------------------------------ historical ownership
+PRINCELY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'princely_states.geojson')
+PRINCELY = set()
+
+
 def owner_of(props, year):
     n = (props.get('NAME') or '').strip()
     s = (props.get('SUBJECTO') or '').strip()
@@ -206,6 +210,17 @@ def nation_shapes(year):
                     un = un.difference(piece)
         unclaimed = [un]
     shapes = {k: clean(unary_union(v)) for k, v in parts.items()}
+    if src in (1900, 1938):
+        # India's princely states (tools/princely_states.geojson, built by princely.py) carved out of British India
+        raj = shapes['United Kingdom']
+        for f in json.load(open(PRINCELY_FILE))['features']:
+            g = clean(clean(shape(f['geometry'])).intersection(raj))
+            if g.is_empty or km2(g) < 500:
+                continue
+            shapes[f['properties']['name']] = g
+            PRINCELY.add(f['properties']['name'])
+            raj = raj.difference(g)
+        shapes['United Kingdom'] = clean(raj)
     return shapes
 
 
@@ -235,7 +250,8 @@ def assign(regions, shapes):
             out.append(dict(r, owner=owner))
             continue
         main = hits[0]
-        keep = [h for h in hits[1:] if h[0] >= max(2500, area * 0.15)]
+        # princely states are small next to the modern regions they sit in: split for them more readily
+        keep = [h for h in hits[1:] if h[0] >= (max(800, area * 0.03) if names[h[1]] in PRINCELY else max(2500, area * 0.15))]
         if not keep:
             out.append(dict(r, owner=main[1]))
             continue
