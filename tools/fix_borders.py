@@ -62,8 +62,8 @@ ISLANDS_1939 = {
     'Nauru': 'Australia', 'Norfolk Island': 'Australia', 'Heard Island': 'Australia', 'Cook Islands': 'New Zealand',
 }
 # Provinces of China held by Japan in March 1939: still Chinese, but occupied when the game starts.
-OCCUPIED_1939 = {'Beijing', 'Tianjin', 'Hebei', 'Shandong', 'Shanxi', 'Jiangsu', 'Shanghai', 'Anhui', 'Hubei', 'Guangdong', 'Hainan',
-                 'East Inner Mongolia'}
+# (by modern first-level region; Japanese-run Mengjiang, 106-115.5°E in Inner Mongolia, by longitude)
+OCCUPIED_1939 = {'Beijing', 'Tianjin', 'Hebei', 'Shandong', 'Shanxi', 'Jiangsu', 'Shanghai', 'Anhui', 'Hubei', 'Guangdong', 'Hainan'}
 
 
 def aden(name):
@@ -201,7 +201,7 @@ def main():
     def modern(p):
         pt = Point(p['x'], p['y'])
         hit = [i for i in tree.query(pt) if geoms[i].contains(pt)] or [int(tree.nearest(pt))]
-        return feats[hit[0]]['properties']['admin']
+        return feats[hit[0]]['properties']['admin'], feats[hit[0]]['properties']['name']
 
     for year in years:
         path = f'data/world-{year}.json'
@@ -212,14 +212,19 @@ def main():
         moved, added = 0, []
         for p in d['provinces']:
             owner = names[p['o']] if p['o'] >= 0 else None
-            new = rule(modern(p), owner, p['n'])
+            name0 = p.pop('n0', p['n'])                      # rules match the build's own piece names
+            c, region = modern(p)
+            new = rule(c, owner, name0)
+            if year == '1939' and c == 'China' and region == 'Inner Mongol' and p['x'] > 115.5:
+                new = JP                                     # Hulunbuir, Hinggan, Jirim and Rehe: Manchukuo
             if new and new != owner:
                 if new not in idx:                           # a nation the source map left out
                     idx[new] = len(names); names.append(new); added.append(new)
                     d['nations'].append({'name': new, 'cap': -1, 'area': 0, 'great': False})
                 p['o'] = idx[new]
                 moved += 1
-            if year == '1939' and p['n'] in OCCUPIED_1939 and owner == 'China':
+            mengjiang = region == 'Inner Mongol' and 106 < p['x'] <= 115.5
+            if year == '1939' and (region in OCCUPIED_1939 or mengjiang) and names[p['o']] == 'China':
                 p['oc'] = idx[JP]
         # capitals: set ones first, then new nations and nations whose capital changed hands get their biggest city
         for nn, capname in CAPITALS.get(year, {}).items():

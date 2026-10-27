@@ -118,6 +118,18 @@ def merge_small(rs, max_count):
 
 
 DIRS = ['East', 'Northeast', 'North', 'Northwest', 'West', 'Southwest', 'South', 'Southeast']
+ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX']
+
+
+def tidy_name(name):
+    """'Northeast Northeast Inner Mongolia 2' -> 'Northeast Inner Mongolia': one direction, no counter."""
+    words = name.split()
+    first = words[0] if words[0] in DIRS or words[0] == 'Central' else None
+    while len(words) > 1 and (words[0] in DIRS or words[0] == 'Central'):
+        words.pop(0)
+    if len(words) > 1 and words[-1].isdigit():
+        words.pop()
+    return ' '.join(([first] if first else []) + words)
 
 
 def split_large(r, limit=320000):
@@ -157,7 +169,7 @@ def split_large(r, limit=320000):
         d = DIRS[int(((ang + 22.5) % 360) // 45)] if pc.distance(c0) > 1 else 'Central'
         used[d] += 1
         nm = f"{d} {r['name']}" + (f" {used[d]}" if used[d] > 1 else '')
-        out.append({'name': nm, 'region': r['region'], 'geom': piece, 'country': r.get('country')})
+        out.append({'name': nm, 'region': r['region'], 'geom': piece, 'country': r.get('country'), 'gen': True})
     # anything the cells missed goes to the nearest piece
     rest = clean(g.difference(unary_union([o['geom'] for o in out])))
     if not rest.is_empty and out:
@@ -286,7 +298,7 @@ def assign(regions, shapes):
             return DIRS[int(((ang + 22.5) % 360) // 45)]
         out.append(dict(r, geom=rest, owner=main[1]))
         for o, p in pieces:
-            out.append(dict(r, name=f"{label(p)} {r['name']}", geom=p, owner=o))
+            out.append(dict(r, name=f"{label(p)} {r['name']}", geom=p, owner=o, gen=True))
     return out, names
 
 
@@ -377,6 +389,24 @@ def build(year, regions, cities):
             pop[i] += cp.get('pop_max') or 0
             city_in.setdefault(cp.get('nameascii') or cp['name'], []).append(i)
             city_in.setdefault(cp['name'], []).append(i)
+    # pieces cut off by the build get the name of their biggest city ("Hailar", not "Northeast Northeast Inner Mongolia 2")
+    best = {}
+    for pt, cp in cpts:
+        hit = ptree.query(pt, predicate='intersects')
+        if len(hit) and (cp.get('pop_max') or 0) > best.get(int(hit[0]), (-1, ''))[0]:
+            best[int(hit[0])] = (cp.get('pop_max') or 0, cp['name'])
+    taken = {p['name'] for p in provs if not p.get('gen')}
+    for i, p in enumerate(provs):
+        if not p.get('gen'):
+            continue
+        nm = best.get(i, (0, None))[1]
+        if not nm or nm in taken:
+            nm = tidy_name(p['name'])
+        base, k = nm, 2
+        while nm in taken:
+            nm = f'{base} {ROMAN[k]}'; k += 1
+        taken.add(nm)
+        p['name0'], p['name'] = p['name'], nm
     out_p = []
     for i, p in enumerate(provs):
         lp = p['simple'].representative_point() if not p['simple'].is_empty else p['geom'].representative_point()
@@ -389,6 +419,8 @@ def build(year, regions, cities):
             'x': round(lp.x, 2), 'y': round(lp.y, 2), 'c': int(i in coast),
             'pop': int(pop[i] // 1000), 'nb': sorted(nb[i]), 'g': geoms_out[i]
         })
+        if p.get('name0'):
+            out_p[-1]['n0'] = p['name0']                 # the generated name, for fix_borders.py rules; removed there
         if sea[i]:
             out_p[-1]['sea'] = sorted(sea[i])
     # nations and capitals
