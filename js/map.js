@@ -71,7 +71,7 @@
       fill: { a: 0.55, sat: 0.35, light: 0.1, mode: 'multiply' }, prov: 'rgba(90,70,40,0.18)', coast: ['rgba(90,75,55,0.75)', 0.8], nation: ['rgba(85,60,35,0.8)', 1.1],
       ink: 'rgba(80,60,38,0.9)', halo: 'rgba(245,238,222,0.7)' }
   };
-  let styleId = 'atlas';
+  let styleId = 'graphite';
   try {
     const q = typeof location !== 'undefined' && new URLSearchParams(location.search).get('style');
     const saved = typeof localStorage !== 'undefined' && localStorage.getItem('frontline-map-style');
