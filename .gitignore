@@ -1,2 +1,5 @@
 tools/__pycache__/
 supabase/.temp/
+
+# intro footage stays local until its rights are cleared (see media/intro/README.md)
+media/intro/*.mp4
