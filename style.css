@@ -41,6 +41,9 @@ canvas.grab { cursor: grabbing; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 14px; border: 1px solid var(--line2); background: var(--bg2); font-size: 12px; }
 .chip:hover { border-color: var(--blue); }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0,0,0,.5); flex: none; }
+.flag { display: inline-block; flex: none; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.55); vertical-align: -2px; margin-right: 6px; }
+.map-mode { background: rgba(255,255,255,.05); border: 1px solid var(--line2); color: var(--text); border-radius: 999px; padding: 5px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.map-mode:hover { border-color: var(--blue); }
 
 /* ---------- start ---------- */
 #start { overflow-y: auto; display: block; }
